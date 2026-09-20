@@ -326,7 +326,7 @@ struct ExportView: View {
     @State private var previewImage: UIImage?
     @State private var generatedImage: UIImage?
     @State private var previewRevision = 0
-    @State private var isGeneratingImage = false
+    @State private var generatingAction: ExportAction?
     @State private var showingShareSheet = false
 #if targetEnvironment(simulator)
     @State private var showingTemplateGallery = SimulatorTestConfiguration.hasFlag("-ShowTemplateGallery")
@@ -521,26 +521,59 @@ struct ExportView: View {
     private var exportActions: some View {
         HStack(spacing: 12) {
             Button { generateImage(for: .save) } label: {
-                Label(L.text("export.savePhoto"), systemImage: "photo.badge.arrow.down")
-                    .frame(maxWidth: .infinity)
+                exportActionLabel(
+                    L.text("export.savePhoto"),
+                    systemImage: "photo.badge.arrow.down",
+                    showsProgress: generatingAction == .save,
+                    progressTint: .accentColor
+                )
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+            .frame(maxWidth: .infinity)
 
             Button { generateImage(for: .share) } label: {
-                Group {
-                    if isGeneratingImage { ProgressView() }
-                    else { Label(L.text("export.sharePNG"), systemImage: "square.and.arrow.up") }
-                }
-                .frame(maxWidth: .infinity)
+                exportActionLabel(
+                    L.text("export.sharePNG"),
+                    systemImage: "square.and.arrow.up",
+                    showsProgress: generatingAction == .share,
+                    progressTint: .white
+                )
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .frame(maxWidth: .infinity)
         }
-        .disabled(selectedYears.isEmpty || isGeneratingImage)
+        .disabled(selectedYears.isEmpty)
+        .allowsHitTesting(!selectedYears.isEmpty && generatingAction == nil)
+        .animation(nil, value: generatingAction)
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(.ultraThinMaterial)
+    }
+
+    private func exportActionLabel(
+        _ title: String,
+        systemImage: String,
+        showsProgress: Bool,
+        progressTint: Color
+    ) -> some View {
+        HStack(spacing: 7) {
+            ZStack {
+                Image(systemName: systemImage)
+                    .opacity(showsProgress ? 0 : 1)
+                    .frame(width: 18, height: 18)
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(progressTint)
+                }
+            }
+            Text(title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity, minHeight: 22)
     }
 
     private func sectionHeader<Trailing: View>(_ title: String, @ViewBuilder trailing: () -> Trailing) -> some View {
@@ -569,19 +602,24 @@ struct ExportView: View {
         }
     }
 
-    private enum ExportAction { case save, share }
+    private enum ExportAction: Equatable { case save, share }
 
     @MainActor
     private func generateImage(for action: ExportAction) {
-        guard !isGeneratingImage else { return }
-        isGeneratingImage = true
+        guard generatingAction == nil else { return }
+        if action == .share, let previewImage {
+            generatedImage = previewImage
+            showingShareSheet = true
+            return
+        }
+        generatingAction = action
         let exportSummaries = summaries
         let scale: CGFloat = exportSummaries.count > 5 ? 1.25 : 2
         Task { @MainActor in
             await Task.yield()
             let image = renderPoster(summaries: exportSummaries, scale: scale)
             generatedImage = image
-            isGeneratingImage = false
+            generatingAction = nil
             guard let image else {
                 saveResult = SaveResult(title: L.text("photoSave.failed.title"), message: L.text("photoSave.imageDataFailure"))
                 return
@@ -1350,17 +1388,13 @@ private struct ExportCalendarHeatmap: View {
     private var monthFontSize: CGFloat { density == .standard ? 12 : 10 }
     private var weekdayFontSize: CGFloat { density == .standard ? 12 : 10 }
 
-    private var weeks: [[Date]] { CalendarGrid.weeks(for: summary.year) }
-
     var body: some View {
-        let calendarWeeks = weeks
-        let monthLabels = CalendarGrid.monthLabels(for: calendarWeeks)
-        let weekdayLabels = CalendarGrid.weekdayLabels
+        let layout = CalendarGrid.layout(for: summary.year)
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: spacing) {
                 Color.clear.frame(width: labelWidth, height: 18)
-                ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { index, _ in
-                    Text(monthLabels[index])
+                ForEach(Array(layout.weeks.enumerated()), id: \.offset) { index, _ in
+                    Text(layout.monthLabels[index])
                         .font(.system(size: monthFontSize, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.secondaryText)
                         .textCase(.uppercase)
@@ -1372,14 +1406,14 @@ private struct ExportCalendarHeatmap: View {
             HStack(alignment: .top, spacing: spacing) {
                 VStack(spacing: spacing) {
                     ForEach(0..<7, id: \.self) { index in
-                        Text(index.isMultiple(of: 2) ? weekdayLabels[index] : "")
+                        Text(index.isMultiple(of: 2) ? layout.weekdayLabels[index] : "")
                             .font(.system(size: weekdayFontSize, weight: .medium, design: .monospaced))
                             .foregroundStyle(theme.secondaryText)
                             .frame(width: labelWidth, height: cellSize, alignment: .trailing)
                     }
                 }
                 HStack(alignment: .top, spacing: spacing) {
-                    ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { _, week in
+                    ForEach(Array(layout.weeks.enumerated()), id: \.offset) { _, week in
                         VStack(spacing: spacing) {
                             ForEach(week, id: \.self) { date in
                                 RoundedRectangle(cornerRadius: 3, style: .continuous)

@@ -315,18 +315,20 @@ struct CalendarHeatmap: View {
     let summary: YearSummary
     var onSelect: ((DailyActivity) -> Void)?
 
-    private var weeks: [[Date]] { CalendarGrid.weeks(for: summary.year) }
+    private let cellSize: CGFloat = 15
+    private let cellSpacing: CGFloat = 3
 
     var body: some View {
-        let calendarWeeks = weeks
-        let monthLabels = CalendarGrid.monthLabels(for: calendarWeeks)
-        let weekdayLabels = CalendarGrid.weekdayLabels
+        let layout = CalendarGrid.layout(for: summary.year)
+        let step = cellSize + cellSpacing
+        let gridWidth = CGFloat(layout.weeks.count) * step - cellSpacing
+        let gridHeight = 7 * step - cellSpacing
         ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 3) {
                     Text("").frame(width: 27)
-                    ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { index, _ in
-                        Text(monthLabels[index])
+                    ForEach(Array(layout.weeks.enumerated()), id: \.offset) { index, _ in
+                        Text(layout.monthLabels[index])
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -335,16 +337,13 @@ struct CalendarHeatmap: View {
                     }
                 }
                 HStack(alignment: .top, spacing: 3) {
-                    weekdayLabelsView(weekdayLabels)
-                    HStack(alignment: .top, spacing: 3) {
-                        ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { _, week in
-                            VStack(spacing: 3) {
-                                ForEach(week, id: \.self) { date in
-                                    dayCell(date)
-                                }
-                            }
-                        }
-                    }
+                    weekdayLabelsView(layout.weekdayLabels)
+                    heatmapCanvas(
+                        weeks: layout.weeks,
+                        step: step,
+                        width: gridWidth,
+                        height: gridHeight
+                    )
                 }
             }
         }
@@ -361,25 +360,44 @@ struct CalendarHeatmap: View {
         }
     }
 
-    @ViewBuilder
-    private func dayCell(_ date: Date) -> some View {
-        let isInYear = CalendarSupport.year(for: date) == summary.year
-        let activity = summary.dailyActivities[CalendarSupport.startOfDay(date)]
-        Button {
-            if let activity { onSelect?(activity) }
-        } label: {
-            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-                .fill(fillColor(for: date, isInYear: isInYear))
-                .frame(width: 15, height: 15)
-                .overlay {
-                    if activity != nil {
-                        RoundedRectangle(cornerRadius: 2.5).stroke(.white.opacity(0.35), lineWidth: 0.5)
+    private func heatmapCanvas(weeks: [[Date]], step: CGFloat, width: CGFloat, height: CGFloat) -> some View {
+        Canvas(rendersAsynchronously: true) { context, _ in
+            for (weekIndex, week) in weeks.enumerated() {
+                for (dayIndex, date) in week.enumerated() {
+                    let isInYear = CalendarSupport.year(for: date) == summary.year
+                    let day = CalendarSupport.startOfDay(date)
+                    let rect = CGRect(
+                        x: CGFloat(weekIndex) * step,
+                        y: CGFloat(dayIndex) * step,
+                        width: cellSize,
+                        height: cellSize
+                    )
+                    let path = Path(roundedRect: rect, cornerRadius: 2.5)
+                    context.fill(path, with: .color(fillColor(for: day, isInYear: isInYear)))
+                    if summary.dailyActivities[day] != nil {
+                        context.stroke(path, with: .color(.white.opacity(0.35)), lineWidth: 0.5)
                     }
                 }
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(activity == nil)
-        .accessibilityLabel(accessibilityText(for: date, activity: activity, isInYear: isInYear))
+        .frame(width: width, height: height)
+        .contentShape(Rectangle())
+        .gesture(
+            SpatialTapGesture().onEnded { value in
+                let weekIndex = Int(value.location.x / step)
+                let dayIndex = Int(value.location.y / step)
+                guard weeks.indices.contains(weekIndex),
+                      weeks[weekIndex].indices.contains(dayIndex),
+                      value.location.x.truncatingRemainder(dividingBy: step) <= cellSize,
+                      value.location.y.truncatingRemainder(dividingBy: step) <= cellSize else { return }
+                let day = CalendarSupport.startOfDay(weeks[weekIndex][dayIndex])
+                if let activity = summary.dailyActivities[day] {
+                    onSelect?(activity)
+                }
+            }
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L.text("year.card.title", CalendarSupport.yearText(summary.year)))
     }
 
     private func fillColor(for date: Date, isInYear: Bool) -> Color {
@@ -390,16 +408,32 @@ struct CalendarHeatmap: View {
         return category.color
     }
 
-    private func accessibilityText(for date: Date, activity: DailyActivity?, isInYear: Bool) -> String {
-        guard isInYear else { return L.text("calendar.outsideYear") }
-        let dateText = CalendarSupport.dateText(date, style: .medium)
-        return activity.map { L.text("calendar.activityAccessibility", dateText, $0.category.title) }
-            ?? L.text("calendar.noActivityAccessibility", dateText)
-    }
 }
 
+@MainActor
 enum CalendarGrid {
-    static var weekdayLabels: [String] {
+    struct Layout {
+        let weeks: [[Date]]
+        let monthLabels: [String]
+        let weekdayLabels: [String]
+    }
+
+    private static var layoutCache: [String: Layout] = [:]
+
+    static func layout(for year: Int) -> Layout {
+        let key = "\(year)|\(L.locale.identifier)"
+        if let cached = layoutCache[key] { return cached }
+        let weeks = makeWeeks(for: year)
+        let layout = Layout(
+            weeks: weeks,
+            monthLabels: makeMonthLabels(for: weeks),
+            weekdayLabels: makeWeekdayLabels()
+        )
+        layoutCache[key] = layout
+        return layout
+    }
+
+    private static func makeWeekdayLabels() -> [String] {
         let formatter = DateFormatter()
         formatter.locale = L.locale
         formatter.calendar = CalendarSupport.mondayCalendar
@@ -407,7 +441,7 @@ enum CalendarGrid {
         return [2, 3, 4, 5, 6, 7, 1].map { labels[$0 - 1] }
     }
 
-    static func weeks(for year: Int) -> [[Date]] {
+    private static func makeWeeks(for year: Int) -> [[Date]] {
         let calendar = CalendarSupport.mondayCalendar
         guard let first = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
               let last = calendar.date(from: DateComponents(year: year, month: 12, day: 31)) else { return [] }
@@ -424,7 +458,7 @@ enum CalendarGrid {
         return result
     }
 
-    static func monthLabels(for weeks: [[Date]]) -> [String] {
+    private static func makeMonthLabels(for weeks: [[Date]]) -> [String] {
         let formatter = DateFormatter()
         formatter.locale = L.locale
         formatter.calendar = CalendarSupport.mondayCalendar
