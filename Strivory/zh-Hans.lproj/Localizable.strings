@@ -87,6 +87,8 @@
 "export.yearToggle" = "%@ 年";
 
 "health.empty" = "尚未读取到有效的 Workout；也可以使用 CSV 补录历史记录。";
+"health.noReadableData" = "未读取到有效运动，已保留现有记录。请确认健康读取权限后重新同步。";
+"health.storageFailure" = "运动数据保存或读取失败，请重试：%@";
 "health.unavailable" = "此设备不支持 Apple 健康。";
 "health.updated" = "已更新 %d 条有效 Workout。";
 

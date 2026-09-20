@@ -87,6 +87,8 @@
 "export.yearToggle" = "%@";
 
 "health.empty" = "No eligible workouts found. You can also add historical records with a CSV.";
+"health.noReadableData" = "No eligible workouts could be read. Existing records have been kept. Check Health access and try syncing again.";
+"health.storageFailure" = "Workout data could not be saved or loaded. Please try again: %@";
 "health.unavailable" = "Apple Health is unavailable on this device.";
 "health.updated" = "Updated %d eligible workouts.";
 

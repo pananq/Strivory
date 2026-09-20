@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct StrivoryApp: App {
-    @StateObject private var store = AppStore()
+    @StateObject private var store = AppStore(healthKit: HealthKitService(), cloudBackup: CloudBackupService())
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {

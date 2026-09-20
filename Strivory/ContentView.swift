@@ -11,11 +11,12 @@ struct ContentView: View {
     @State private var selectedActivity: DailyActivity?
 
     var body: some View {
+        let summaries = homeSummaries
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    header
-                    ForEach(homeSummaries) { summary in
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    header(yearCount: summaries.count)
+                    ForEach(summaries) { summary in
                         YearCalendarView(summary: summary, onSelect: { selectedActivity = $0 })
                     }
                     sourceStatus
@@ -29,7 +30,7 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        Task { await store.requestHealthAccessAndRefresh() }
+                        Task { await store.requestHealthAccessAndRefresh(forceFullRefresh: true) }
                     } label: {
                         if store.isLoadingHealth { ProgressView() } else { Label(L.text("action.syncHealth"), systemImage: "heart.text.square") }
                     }
@@ -43,12 +44,27 @@ struct ContentView: View {
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.commaSeparatedText, .plainText]) { result in
                 switch result {
                 case .success(let url):
-                    let secured = url.startAccessingSecurityScopedResource()
-                    defer { if secured { url.stopAccessingSecurityScopedResource() } }
-                    do {
-                        pendingImport = CSVImporter.parse(contents: try String(contentsOf: url, encoding: .utf8), fileName: url.lastPathComponent)
-                    } catch {
-                        store.healthMessage = L.text("csv.readFailure", error.localizedDescription)
+                    let fileName = url.lastPathComponent
+                    let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+                    guard size ?? 0 <= CSVImporter.maximumFileSize else {
+                        store.healthMessage = L.text("csv.readFailure", "File exceeds the 5 MB import limit.")
+                        return
+                    }
+                    Task.detached {
+                        let secured = url.startAccessingSecurityScopedResource()
+                        defer { if secured { url.stopAccessingSecurityScopedResource() } }
+                        do {
+                            let data = try Data(contentsOf: url)
+                            guard let contents = CSVImporter.decode(data) else {
+                                throw CocoaError(.fileReadInapplicableStringEncoding)
+                            }
+                            let parsed = CSVImporter.parse(contents: contents, fileName: fileName)
+                            await MainActor.run { pendingImport = parsed }
+                        } catch {
+                            await MainActor.run {
+                                store.healthMessage = L.text("csv.readFailure", error.localizedDescription)
+                            }
+                        }
                     }
                 case .failure(let error):
                     store.healthMessage = L.text("csv.notSelected", error.localizedDescription)
@@ -90,7 +106,7 @@ struct ContentView: View {
         return summaries.isEmpty ? [store.summary(for: CalendarSupport.year(for: .now))] : summaries
     }
 
-    private var header: some View {
+    private func header(yearCount: Int) -> some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(L.text("home.slogan"))
@@ -100,7 +116,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(L.text("home.yearCount", homeSummaries.filter { $0.activeDays > 0 }.count))
+            Text(L.text("home.yearCount", yearCount))
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .padding(.horizontal, 12)
@@ -192,12 +208,15 @@ struct CalendarHeatmap: View {
     private var weeks: [[Date]] { CalendarGrid.weeks(for: summary.year) }
 
     var body: some View {
+        let calendarWeeks = weeks
+        let monthLabels = CalendarGrid.monthLabels(for: calendarWeeks)
+        let weekdayLabels = CalendarGrid.weekdayLabels
         ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 3) {
                     Text("").frame(width: 27)
-                    ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                        Text(CalendarGrid.monthLabel(for: week))
+                    ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { index, _ in
+                        Text(monthLabels[index])
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -206,9 +225,9 @@ struct CalendarHeatmap: View {
                     }
                 }
                 HStack(alignment: .top, spacing: 3) {
-                    weekdayLabels
+                    weekdayLabelsView(weekdayLabels)
                     HStack(alignment: .top, spacing: 3) {
-                        ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
+                        ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { _, week in
                             VStack(spacing: 3) {
                                 ForEach(week, id: \.self) { date in
                                     dayCell(date)
@@ -221,10 +240,10 @@ struct CalendarHeatmap: View {
         }
     }
 
-    private var weekdayLabels: some View {
+    private func weekdayLabelsView(_ labels: [String]) -> some View {
         VStack(spacing: 3) {
             ForEach(0..<7, id: \.self) { index in
-                Text(index.isMultiple(of: 2) ? CalendarGrid.weekdayLabels[index] : "")
+                Text(index.isMultiple(of: 2) ? labels[index] : "")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(width: 27, height: 15, alignment: .trailing)
@@ -295,13 +314,15 @@ enum CalendarGrid {
         return result
     }
 
-    static func monthLabel(for week: [Date]) -> String {
-        guard let firstOfMonth = week.first(where: { CalendarSupport.mondayCalendar.component(.day, from: $0) == 1 }) else { return "" }
+    static func monthLabels(for weeks: [[Date]]) -> [String] {
         let formatter = DateFormatter()
         formatter.locale = L.locale
         formatter.calendar = CalendarSupport.mondayCalendar
         formatter.setLocalizedDateFormatFromTemplate("LLL")
-        return formatter.string(from: firstOfMonth)
+        return weeks.map { week in
+            guard let firstOfMonth = week.first(where: { CalendarSupport.mondayCalendar.component(.day, from: $0) == 1 }) else { return "" }
+            return formatter.string(from: firstOfMonth)
+        }
     }
 }
 

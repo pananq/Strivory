@@ -175,7 +175,7 @@ struct YearSummary: Identifiable {
 /// snapshot is an app-local archive that lets the calendar be restored before
 /// Health access is granted again.
 struct ICloudBackupSnapshot: Codable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int = currentSchemaVersion
     var updatedAt: Date
@@ -185,6 +185,12 @@ struct ICloudBackupSnapshot: Codable, Sendable {
     var deletedBatchDates: [String: Date]
     var displayName: String
     var displayNameUpdatedAt: Date
+    var deletedHealthWorkoutIDs: Set<UUID> = []
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, updatedAt, healthArchive, importBatches, deletedBatchDates
+        case displayName, displayNameUpdatedAt, deletedHealthWorkoutIDs
+    }
 
     static func empty(displayName: String, displayNameUpdatedAt: Date = .now) -> Self {
         Self(
@@ -207,12 +213,13 @@ enum ICloudBackupState: Equatable {
 }
 
 enum CalendarSupport {
-    static var mondayCalendar: Calendar {
+    static let mondayCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .autoupdatingCurrent
         calendar.firstWeekday = 2
         calendar.minimumDaysInFirstWeek = 4
         return calendar
-    }
+    }()
 
     static func startOfDay(_ date: Date) -> Date {
         mondayCalendar.startOfDay(for: date)
@@ -245,11 +252,21 @@ enum CalendarSupport {
     }
 
     static func dateText(_ date: Date, style: DateFormatter.Style) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = L.locale
-        formatter.calendar = mondayCalendar
-        formatter.dateStyle = style
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
+        let format: Date.FormatStyle
+        switch style {
+        case .short:
+            format = .dateTime.year().month().day()
+        case .medium:
+            format = .dateTime.year().month(.abbreviated).day()
+        case .long:
+            format = .dateTime.year().month(.wide).day()
+        case .full:
+            format = .dateTime.weekday(.wide).year().month(.wide).day()
+        case .none:
+            format = .dateTime.year().month().day()
+        @unknown default:
+            format = .dateTime.year().month().day()
+        }
+        return date.formatted(format.locale(L.locale))
     }
 }

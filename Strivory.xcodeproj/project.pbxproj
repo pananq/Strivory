@@ -21,6 +21,7 @@
 		A012 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = B016 /* InfoPlist.strings */; };
 		A013 /* CloudBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B019 /* CloudBackupService.swift */; };
 		A014 /* CloudKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B020 /* CloudKit.framework */; };
+		A015 /* WorkoutSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B022 /* WorkoutSync.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +44,7 @@
 		B019 /* CloudBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudBackupService.swift; sourceTree = "<group>"; };
 		B020 /* CloudKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CloudKit.framework; path = System/Library/Frameworks/CloudKit.framework; sourceTree = SDKROOT; };
 		B021 /* StrivoryDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StrivoryDebug.entitlements; sourceTree = "<group>"; };
+		B022 /* WorkoutSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSync.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,6 +80,7 @@
 				B006 /* ContentView.swift */,
 				B007 /* ImportExportViews.swift */,
 				B019 /* CloudBackupService.swift */,
+				B022 /* WorkoutSync.swift */,
 				B008 /* Strivory.entitlements */,
 				B021 /* StrivoryDebug.entitlements */,
 				B011 /* Assets.xcassets */,
@@ -186,6 +189,7 @@
 				A006 /* ContentView.swift in Sources */,
 				A007 /* ImportExportViews.swift in Sources */,
 				A013 /* CloudBackupService.swift in Sources */,
+				A015 /* WorkoutSync.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -306,7 +310,7 @@
 				CODE_SIGN_ENTITLEMENTS = Strivory/StrivoryDebug.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = KC3GA3LQ4C;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -318,7 +322,7 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pananq.strivory.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -336,7 +340,7 @@
 				CLOUDKIT_CONTAINER_ENVIRONMENT = Production;
 				CODE_SIGN_ENTITLEMENTS = Strivory/Strivory.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = KC3GA3LQ4C;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -348,7 +352,7 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pananq.strivory.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

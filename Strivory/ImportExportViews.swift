@@ -224,6 +224,7 @@ struct ExportView: View {
     let initialYear: Int
     @State private var selectedYears: Set<Int> = []
     @State private var generatedImage: UIImage?
+    @State private var isGeneratingImage = false
     @State private var showingShareSheet = false
     @State private var saveResult: SaveResult?
     @State private var selectedTemplate: ExportPosterTemplate = .editorial
@@ -292,8 +293,13 @@ struct ExportView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L.text("action.close")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L.text("export.generatePNG")) { generateImage() }
-                        .disabled(selectedYears.isEmpty)
+                    Button {
+                        generateImage()
+                    } label: {
+                        if isGeneratingImage { ProgressView() }
+                        else { Text(L.text("export.generatePNG")) }
+                    }
+                    .disabled(selectedYears.isEmpty || isGeneratingImage)
                 }
             }
             .onAppear { if selectedYears.isEmpty { selectedYears = [initialYear] } }
@@ -309,12 +315,20 @@ struct ExportView: View {
 
     @MainActor
     private func generateImage() {
-        let content = MultiYearExportView(name: store.exportName, summaries: summaries, template: selectedTemplate)
-            .frame(width: 1_320)
-            .background(.white)
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = 2
-        generatedImage = renderer.uiImage
+        guard !isGeneratingImage else { return }
+        isGeneratingImage = true
+        let exportSummaries = summaries
+        let scale: CGFloat = exportSummaries.count > 5 ? 1.25 : 2
+        Task { @MainActor in
+            await Task.yield()
+            let content = MultiYearExportView(name: store.exportName, summaries: exportSummaries, template: selectedTemplate)
+                .frame(width: 1_320)
+                .background(.white)
+            let renderer = ImageRenderer(content: content)
+            renderer.scale = scale
+            generatedImage = renderer.uiImage
+            isGeneratingImage = false
+        }
     }
 
     @MainActor
@@ -699,11 +713,14 @@ private struct ExportCalendarHeatmap: View {
     private var weeks: [[Date]] { CalendarGrid.weeks(for: summary.year) }
 
     var body: some View {
+        let calendarWeeks = weeks
+        let monthLabels = CalendarGrid.monthLabels(for: calendarWeeks)
+        let weekdayLabels = CalendarGrid.weekdayLabels
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: spacing) {
                 Color.clear.frame(width: labelWidth, height: 18)
-                ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                    Text(CalendarGrid.monthLabel(for: week))
+                ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { index, _ in
+                    Text(monthLabels[index])
                         .font(.system(size: monthFontSize, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.secondaryText)
                         .textCase(.uppercase)
@@ -715,14 +732,14 @@ private struct ExportCalendarHeatmap: View {
             HStack(alignment: .top, spacing: spacing) {
                 VStack(spacing: spacing) {
                     ForEach(0..<7, id: \.self) { index in
-                        Text(index.isMultiple(of: 2) ? CalendarGrid.weekdayLabels[index] : "")
+                        Text(index.isMultiple(of: 2) ? weekdayLabels[index] : "")
                             .font(.system(size: weekdayFontSize, weight: .medium, design: .monospaced))
                             .foregroundStyle(theme.secondaryText)
                             .frame(width: labelWidth, height: cellSize, alignment: .trailing)
                     }
                 }
                 HStack(alignment: .top, spacing: spacing) {
-                    ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
+                    ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { _, week in
                         VStack(spacing: spacing) {
                             ForEach(week, id: \.self) { date in
                                 RoundedRectangle(cornerRadius: 3, style: .continuous)
