@@ -9,6 +9,9 @@
 
 "batches.summary" = "%d 个日期 · %@";
 "batches.title" = "CSV 导入批次";
+"batches.delete" = "删除";
+"batches.empty.title" = "暂无导入记录";
+"batches.empty.message" = "通过 CSV 导入的批次会显示在这里。";
 
 "calendar.activityAccessibility" = "%@，%@";
 "calendar.noActivityAccessibility" = "%@，无运动";
@@ -76,6 +79,25 @@
 "export.template.editorial.detail" = "暖白纸张与舒展排版，适合沉静地回看多年的运动记录。";
 "export.template.nightAtlas.title" = "夜色图鉴";
 "export.template.nightAtlas.detail" = "深色数据图鉴，以紧凑年度带和醒目运动色彩呈现记录。";
+"export.template.quietMinimal.title" = "极简留白";
+"export.template.quietMinimal.detail" = "以清晰留白和现代排版，专注呈现运动档案。";
+"export.template.quietMinimal.footer" = "每一次坚持，都值得被记录";
+"export.template.motionSpectrum.title" = "运动光谱";
+"export.template.motionSpectrum.detail" = "以鲜明渐变衬托运动色彩，让多年记录更有活力。";
+"export.chooseTemplate" = "选择模板";
+"export.viewAllTemplates" = "查看全部";
+"export.allTemplates" = "全部模板";
+"export.templateDataHint" = "模板只会改变视觉排版，不会修改你的运动数据。";
+"export.templateFilter.all" = "全部";
+"export.templateFilter.minimal" = "简约";
+"export.templateFilter.dark" = "深色";
+"export.templateFilter.color" = "彩色";
+"export.selectedYears" = "已选择 %d 年";
+"export.previewScaleHint" = "按最终导出画布等比例预览";
+"export.preparingPreview" = "正在生成预览…";
+"export.noYears.title" = "请至少选择一个年份";
+"export.noYears.message" = "在上方选择年份后即可预览海报。";
+"export.posterName" = "海报署名：%@";
 "export.poster.activeDays" = "活动日";
 "export.poster.kicker" = "运动记录 · %@—%@";
 "export.poster.kicker.single" = "运动记录 · %@";
@@ -87,6 +109,8 @@
 "export.yearToggle" = "%@ 年";
 
 "health.empty" = "尚未读取到有效的 Workout；也可以使用 CSV 补录历史记录。";
+"health.noReadableData" = "未读取到有效运动，已保留现有记录。请确认健康读取权限后重新同步。";
+"health.storageFailure" = "运动数据保存或读取失败，请重试：%@";
 "health.unavailable" = "此设备不支持 Apple 健康。";
 "health.updated" = "已更新 %d 条有效 Workout。";
 
@@ -115,6 +139,16 @@
 "home.slogan" = "记录一生的每一次动起来";
 "home.subtitle" = "从 Apple 健康与 CSV 汇总你的运动年历";
 "home.yearCount" = "%d 年记录";
+"home.archiveSuffix" = "的运动档案";
+"home.totalActiveDays" = "累计运动日";
+"home.thisYear" = "今年运动日";
+"home.loggedYears" = "记录年份";
+"home.allYears" = "全部年历";
+"home.newestFirst" = "最近年份在前";
+"home.synced" = "健康数据已更新";
+"home.syncing" = "正在同步健康数据…";
+"home.sync" = "同步";
+"home.createPoster" = "制作并分享海报";
 
 "importStart.chooseFile" = "选择 CSV 文件";
 "importStart.description" = "CSV 只需要日期和运动类型。每行代表一个确认的活动日；若与 Apple 健康同日冲突，可在导入预览中选择补全或覆盖。";
@@ -137,6 +171,14 @@
 
 "settings.displayName" = "显示名称";
 "settings.displayNameHint" = "此名称会显示在多年长图的标题中。";
+"settings.dataSection" = "数据管理";
+"settings.health" = "Apple 健康";
+"settings.healthDetail" = "已连接 · 自动读取运动记录";
+"settings.importCSV" = "导入运动记录";
+"settings.importCSVDetail" = "CSV 文件 · 日期与运动类型";
+"settings.importedRecords" = "已导入记录";
+"settings.importedRecordsDetail" = "%d 个导入批次";
+"settings.personalizationSection" = "个性化";
 "settings.exportSection" = "导出";
 "settings.iCloudBackup" = "iCloud 备份与恢复";
 "settings.iCloudBackupHint" = "开启后，Strivory 会在 App 处于活跃状态时每天最多一次，将已读取的 Workout 快照、CSV 导入批次和显示名称备份到你的私有 iCloud 空间。删除 App 后可恢复；“立即同步”始终会立刻创建备份。不会将记录写回 Apple 健康。";

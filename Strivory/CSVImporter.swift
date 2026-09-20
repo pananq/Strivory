@@ -1,7 +1,8 @@
+import CoreFoundation
 import Foundation
 
-struct CSVImportIssue: Identifiable, Hashable {
-    enum Kind: Hashable { case invalidHeader, invalidDate, missingType, duplicateDate }
+struct CSVImportIssue: Identifiable, Hashable, Sendable {
+    enum Kind: Hashable, Sendable { case invalidHeader, invalidDate, missingType, duplicateDate }
 
     let id = UUID()
     let line: Int
@@ -9,7 +10,7 @@ struct CSVImportIssue: Identifiable, Hashable {
     let kind: Kind
 }
 
-struct CSVParseResult: Identifiable {
+struct CSVParseResult: Identifiable, Sendable {
     let id = UUID()
     let fileName: String
     let records: [WorkoutRecord]
@@ -21,6 +22,16 @@ struct CSVParseResult: Identifiable {
 }
 
 enum CSVImporter {
+    static let maximumFileSize = 5 * 1_024 * 1_024
+
+    static func decode(_ data: Data) -> String? {
+        let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+        return [.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, gb18030]
+            .lazy
+            .compactMap { String(data: data, encoding: $0) }
+            .first
+    }
+
     static func parse(contents: String, fileName: String) -> CSVParseResult {
         let lines = contents
             .replacingOccurrences(of: "\r\n", with: "\n")

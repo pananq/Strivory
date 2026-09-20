@@ -11,14 +11,8 @@ enum HealthKitServiceError: LocalizedError {
     }
 }
 
-struct HealthKitFetchResult: Sendable {
-    let workouts: [WorkoutRecord]
-    let deletedWorkoutIDs: Set<UUID>
-    let anchorData: Data
-}
-
 @MainActor
-final class HealthKitService {
+final class HealthKitService: HealthKitProviding {
     private let store = HKHealthStore()
 
     func requestAuthorization() async throws {

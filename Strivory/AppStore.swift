@@ -15,29 +15,33 @@ final class AppStore: ObservableObject {
     @Published var healthMessage: String?
     @Published private(set) var iCloudErrorMessage: String?
     @Published var language: AppLanguage {
-        didSet { UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.storageKey) }
+        didSet { defaults.set(language.rawValue, forKey: AppLanguage.storageKey) }
     }
     @Published var userName: String {
         didSet {
             guard !isApplyingBackupSnapshot else { return }
-            UserDefaults.standard.set(userName, forKey: Self.userNameKey)
+            defaults.set(userName, forKey: Self.userNameKey)
             userNameUpdatedAt = .now
-            UserDefaults.standard.set(userNameUpdatedAt, forKey: Self.userNameUpdatedAtKey)
+            defaults.set(userNameUpdatedAt, forKey: Self.userNameUpdatedAtKey)
+            backupRevision += 1
             scheduleICloudSync()
         }
     }
     @Published var iCloudBackupEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(iCloudBackupEnabled, forKey: Self.iCloudBackupEnabledKey)
+            defaults.set(iCloudBackupEnabled, forKey: Self.iCloudBackupEnabledKey)
             if iCloudBackupEnabled { scheduleICloudSync() }
             else { iCloudBackupState = .disabled }
         }
     }
 
-    private let healthKit = HealthKitService()
-    private let cloudBackup = CloudBackupService()
+    private let healthKit: any HealthKitProviding
+    private let cloudBackup: any CloudBackupProviding
+    private let defaults: UserDefaults
+    private let archiveURL: URL?
     private static let batchesKey = "strivory.csv.batches"
     private static let healthArchiveKey = "strivory.health.archive"
+    private static let healthArchiveFileName = "health-archive.json"
     private static let healthAnchorKey = "strivory.health.anchor"
     private static let deletedBatchDatesKey = "strivory.csv.deleted-batches"
     private static let userNameKey = "strivory.user.name"
@@ -46,40 +50,66 @@ final class AppStore: ObservableObject {
     private static let lastAutomaticICloudBackupKey = "strivory.icloud-backup.last-automatic"
     private var deletedBatchDates: [String: Date] = [:]
     private var healthAnchorData: Data?
+    private var deletedHealthWorkoutIDs: Set<UUID> = []
+    private var healthReconciliationVersion = 0
+    private var needsFullHealthRefresh = false
+    private var backupRevision = 0
     private var userNameUpdatedAt: Date
     private var isApplyingBackupSnapshot = false
+    private var summaryCache: [Int: YearSummary] = [:]
+    private var hasPendingICloudChanges = false
+    private var delayedICloudSyncTask: Task<Void, Never>?
 
-    init() {
-        language = AppLanguage(rawValue: UserDefaults.standard.string(forKey: AppLanguage.storageKey) ?? "") ?? .simplifiedChinese
-        userName = UserDefaults.standard.string(forKey: Self.userNameKey) ?? L.text("export.defaultName")
-        userNameUpdatedAt = UserDefaults.standard.object(forKey: Self.userNameUpdatedAtKey) as? Date ?? .now
-        iCloudBackupEnabled = UserDefaults.standard.bool(forKey: Self.iCloudBackupEnabledKey)
+    init(healthKit: any HealthKitProviding, cloudBackup: any CloudBackupProviding,
+         defaults: UserDefaults = .standard, archiveURL: URL? = nil, prepareBackupOnLaunch: Bool = true) {
+        self.healthKit = healthKit
+        self.cloudBackup = cloudBackup
+        self.defaults = defaults
+        self.archiveURL = archiveURL
+        language = AppLanguage(rawValue: defaults.string(forKey: AppLanguage.storageKey) ?? "") ?? .simplifiedChinese
+        userName = defaults.string(forKey: Self.userNameKey) ?? L.text("export.defaultName")
+        userNameUpdatedAt = defaults.object(forKey: Self.userNameUpdatedAtKey) as? Date
+            ?? (defaults.string(forKey: Self.userNameKey) == nil ? .distantPast : .now)
+        iCloudBackupEnabled = defaults.bool(forKey: Self.iCloudBackupEnabledKey)
         loadBatches()
         loadHealthArchive()
-        loadHealthAnchor()
         loadDeletedBatchDates()
-        Task { await prepareICloudBackup() }
+        if prepareBackupOnLaunch { Task { await prepareICloudBackup() } }
     }
 
-    func requestHealthAccessAndRefresh() async {
-        guard !isLoadingHealth else { return }
+    func requestHealthAccessAndRefresh(forceFullRefresh: Bool = false) async {
+        guard !isLoadingHealth else {
+            needsFullHealthRefresh = needsFullHealthRefresh || forceFullRefresh
+            return
+        }
         isLoadingHealth = true
-        defer { isLoadingHealth = false }
+        defer {
+            isLoadingHealth = false
+            if needsFullHealthRefresh {
+                needsFullHealthRefresh = false
+                Task { await requestHealthAccessAndRefresh(forceFullRefresh: true) }
+            }
+        }
         do {
             try await healthKit.requestAuthorization()
-            let result = try await healthKit.fetchWorkouts(anchorData: healthAnchorData)
-            if healthAnchorData == nil {
-                replaceHealthArchive(with: result.workouts)
-            } else {
-                applyHealthChanges(result.workouts, deletedIDs: result.deletedWorkoutIDs)
+            let fullRefresh = forceFullRefresh || healthAnchorData == nil
+                || healthReconciliationVersion < PersistedHealthState.currentReconciliationVersion
+            let result = try await healthKit.fetchWorkouts(anchorData: fullRefresh ? nil : healthAnchorData)
+            // Empty reads cannot distinguish denied access from an empty store.
+            // Keep restored history, and retry reconciliation after access returns.
+            if fullRefresh && result.workouts.isEmpty && result.deletedWorkoutIDs.isEmpty {
+                healthMessage = L.text("health.noReadableData")
+                return
             }
-            healthAnchorData = result.anchorData
-            UserDefaults.standard.set(result.anchorData, forKey: Self.healthAnchorKey)
-            healthRecords = healthArchive
+            let next = persistedHealthState.applying(result, isFullRefresh: fullRefresh)
+            let changed = next.records != healthArchive || next.deletedWorkoutIDs != deletedHealthWorkoutIDs
+            try saveHealthState(next)
+            applyHealthState(next)
+            if changed { backupRevision += 1 }
             healthMessage = healthRecords.isEmpty
                 ? L.text("health.empty")
                 : L.text("health.updated", healthRecords.count)
-            scheduleICloudSync()
+            if changed { scheduleICloudSync() }
         } catch {
             healthMessage = error.localizedDescription
         }
@@ -93,6 +123,8 @@ final class AppStore: ObservableObject {
         guard !records.isEmpty else { return }
         importBatches.append(CSVImportBatch(id: batchID, name: result.fileName, createdAt: .now, strategy: strategy, records: records))
         saveBatches()
+        invalidateSummaryCache()
+        backupRevision += 1
         scheduleICloudSync()
     }
 
@@ -101,10 +133,19 @@ final class AppStore: ObservableObject {
         deletedBatchDates[batch.id.uuidString] = .now
         saveBatches()
         saveDeletedBatchDates()
+        invalidateSummaryCache()
+        backupRevision += 1
         scheduleICloudSync()
     }
 
     func summary(for year: Int) -> YearSummary {
+        if let cached = summaryCache[year] { return cached }
+        let summary = buildSummary(for: year)
+        summaryCache[year] = summary
+        return summary
+    }
+
+    private func buildSummary(for year: Int) -> YearSummary {
         let calendar = CalendarSupport.mondayCalendar
         var healthByDay: [Date: [WorkoutRecord]] = [:]
         for record in calendarRecords where calendar.component(.year, from: record.startDate) == year {
@@ -173,6 +214,11 @@ final class AppStore: ObservableObject {
     func prepareICloudBackup() async {
         iCloudBackupState = .checking
         iCloudErrorMessage = nil
+        let needsRestoreCheck = importBatches.isEmpty && healthArchive.isEmpty
+        guard iCloudBackupEnabled || needsRestoreCheck else {
+            iCloudBackupState = .disabled
+            return
+        }
         guard await cloudBackup.isAccountAvailable() else {
             iCloudBackupState = .unavailable
             return
@@ -196,26 +242,39 @@ final class AppStore: ObservableObject {
         await syncICloudBackup(force: true)
     }
 
-    /// Automatic backups run at most once per local calendar day. The manual
-    /// action bypasses this limit so users can protect a change immediately.
+    /// Routine checks are daily; local changes and manual backups bypass the limit.
     func syncICloudBackup(force: Bool) async {
-        guard iCloudBackupEnabled, !isSyncingICloud else { return }
-        guard force || isAutomaticICloudBackupDue else { return }
+        guard iCloudBackupEnabled else { return }
+        if isSyncingICloud {
+            hasPendingICloudChanges = true
+            return
+        }
+        guard force || hasPendingICloudChanges || isAutomaticICloudBackupDue else { return }
         isSyncingICloud = true
-        defer { isSyncingICloud = false }
+        hasPendingICloudChanges = false
+        var completed = false
+        defer {
+            isSyncingICloud = false
+            if completed && hasPendingICloudChanges { scheduleICloudSync() }
+        }
         do {
+            let revision = backupRevision
             let merged = try await cloudBackup.sync(local: backupSnapshot())
-            applyBackupSnapshot(merged)
+            // HealthKit, imports and profile edits can change while CloudKit is
+            // suspended. Rebase against those changes before touching local data.
+            try applyBackupSnapshot(ICloudBackupSnapshot.merging(local: backupSnapshot(), remote: merged))
+            hasPendingICloudChanges = hasPendingICloudChanges || backupRevision != revision
+            completed = true
             hasICloudBackup = true
             iCloudBackupState = .ready(lastBackup: merged.updatedAt)
             iCloudErrorMessage = nil
-            if !force {
-                UserDefaults.standard.set(Date.now, forKey: Self.lastAutomaticICloudBackupKey)
-            }
+            defaults.set(Date.now, forKey: Self.lastAutomaticICloudBackupKey)
         } catch let error as ICloudBackupError where error == .accountUnavailable {
+            hasPendingICloudChanges = true
             iCloudBackupState = .unavailable
             recordICloudFailure(error)
         } catch {
+            hasPendingICloudChanges = true
             iCloudBackupState = .failed
             recordICloudFailure(error)
         }
@@ -224,12 +283,15 @@ final class AppStore: ObservableObject {
     func restoreICloudBackup() async {
         guard !isSyncingICloud else { return }
         isSyncingICloud = true
-        defer { isSyncingICloud = false }
+        defer {
+            isSyncingICloud = false
+            if hasPendingICloudChanges { scheduleICloudSync() }
+        }
         do {
             guard let remote = try await cloudBackup.load() else {
                 throw ICloudBackupError.malformedBackup
             }
-            applyBackupSnapshot(remote)
+            try applyBackupSnapshot(ICloudBackupSnapshot.merging(local: backupSnapshot(), remote: remote), needsReconciliation: true)
             hasICloudBackup = true
             iCloudRestoreAvailable = false
             iCloudBackupEnabled = true
@@ -266,12 +328,12 @@ final class AppStore: ObservableObject {
 
     private func saveBatches() {
         if let data = try? JSONEncoder().encode(importBatches) {
-            UserDefaults.standard.set(data, forKey: Self.batchesKey)
+            defaults.set(data, forKey: Self.batchesKey)
         }
     }
 
     private func loadBatches() {
-        guard let data = UserDefaults.standard.data(forKey: Self.batchesKey),
+        guard let data = defaults.data(forKey: Self.batchesKey),
               let decoded = try? JSONDecoder().decode([CSVImportBatch].self, from: data) else { return }
         importBatches = decoded
     }
@@ -279,47 +341,89 @@ final class AppStore: ObservableObject {
     private var calendarRecords: [WorkoutRecord] {
         var byID = Dictionary(uniqueKeysWithValues: healthArchive.map { ($0.id, $0) })
         for record in healthRecords { byID[record.id] = record }
+        for id in deletedHealthWorkoutIDs { byID.removeValue(forKey: id) }
         return byID.values.sorted { $0.startDate < $1.startDate }
     }
 
-    private func replaceHealthArchive(with records: [WorkoutRecord]) {
-        healthArchive = records.sorted { $0.startDate < $1.startDate }
-        saveHealthArchive()
+    private var persistedHealthState: PersistedHealthState {
+        PersistedHealthState(records: healthArchive, deletedWorkoutIDs: deletedHealthWorkoutIDs,
+                             anchorData: healthAnchorData, reconciliationVersion: healthReconciliationVersion)
     }
 
-    private func applyHealthChanges(_ records: [WorkoutRecord], deletedIDs: Set<UUID>) {
-        var byID = Dictionary(uniqueKeysWithValues: healthArchive.map { ($0.id, $0) })
-        for id in deletedIDs { byID.removeValue(forKey: id) }
-        for record in records { byID[record.id] = record }
-        healthArchive = byID.values.sorted { $0.startDate < $1.startDate }
-        saveHealthArchive()
+    private func applyHealthState(_ state: PersistedHealthState) {
+        healthArchive = state.records
+        healthRecords = state.records
+        deletedHealthWorkoutIDs = state.deletedWorkoutIDs
+        healthAnchorData = state.anchorData
+        healthReconciliationVersion = state.reconciliationVersion
+        invalidateSummaryCache()
     }
 
-    private func saveHealthArchive() {
-        if let data = try? JSONEncoder().encode(healthArchive) {
-            UserDefaults.standard.set(data, forKey: Self.healthArchiveKey)
+    private func saveHealthState(_ state: PersistedHealthState) throws {
+        do {
+            let fileURL = try archiveURL ?? Self.healthArchiveFileURL()
+            let data = try JSONEncoder().encode(state)
+            var options: Data.WritingOptions = .atomic
+            #if os(iOS)
+            options.insert(.completeFileProtectionUntilFirstUserAuthentication)
+            #endif
+            try data.write(to: fileURL, options: options)
+            defaults.removeObject(forKey: Self.healthArchiveKey)
+            defaults.removeObject(forKey: Self.healthAnchorKey)
+        } catch {
+            throw HealthPersistenceError.saveFailed(error.localizedDescription)
         }
     }
 
     private func loadHealthArchive() {
-        guard let data = UserDefaults.standard.data(forKey: Self.healthArchiveKey),
-              let decoded = try? JSONDecoder().decode([WorkoutRecord].self, from: data) else { return }
-        healthArchive = decoded
-        healthRecords = decoded
+        do {
+            let fileURL = try archiveURL ?? Self.healthArchiveFileURL()
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                let data = try Data(contentsOf: fileURL)
+                if let state = try? JSONDecoder().decode(PersistedHealthState.self, from: data) {
+                    applyHealthState(state)
+                } else {
+                    try migrateLegacyHealthArchive(data)
+                }
+                return
+            }
+            if let data = defaults.data(forKey: Self.healthArchiveKey) {
+                try migrateLegacyHealthArchive(data)
+            }
+        } catch {
+            healthMessage = L.text("health.storageFailure", error.localizedDescription)
+        }
     }
 
-    private func loadHealthAnchor() {
-        healthAnchorData = UserDefaults.standard.data(forKey: Self.healthAnchorKey)
+    private func migrateLegacyHealthArchive(_ data: Data) throws {
+        let records = try JSONDecoder().decode([WorkoutRecord].self, from: data)
+        let state = PersistedHealthState(records: records, deletedWorkoutIDs: [],
+                                         anchorData: nil, reconciliationVersion: 0)
+        // Preserve the visible legacy history even if migration cannot write yet.
+        applyHealthState(state)
+        try saveHealthState(state)
+    }
+
+    private static func healthArchiveFileURL() throws -> URL {
+        let directory = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let appDirectory = directory.appendingPathComponent("Strivory", isDirectory: true)
+        try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+        return appDirectory.appendingPathComponent(healthArchiveFileName)
     }
 
     private func saveDeletedBatchDates() {
         if let data = try? JSONEncoder().encode(deletedBatchDates) {
-            UserDefaults.standard.set(data, forKey: Self.deletedBatchDatesKey)
+            defaults.set(data, forKey: Self.deletedBatchDatesKey)
         }
     }
 
     private func loadDeletedBatchDates() {
-        guard let data = UserDefaults.standard.data(forKey: Self.deletedBatchDatesKey),
+        guard let data = defaults.data(forKey: Self.deletedBatchDatesKey),
               let decoded = try? JSONDecoder().decode([String: Date].self, from: data) else { return }
         deletedBatchDates = decoded
     }
@@ -331,33 +435,51 @@ final class AppStore: ObservableObject {
             importBatches: importBatches,
             deletedBatchDates: deletedBatchDates,
             displayName: userName,
-            displayNameUpdatedAt: userNameUpdatedAt
+            displayNameUpdatedAt: userNameUpdatedAt,
+            deletedHealthWorkoutIDs: deletedHealthWorkoutIDs
         )
     }
 
-    private func applyBackupSnapshot(_ snapshot: ICloudBackupSnapshot) {
-        healthArchive = snapshot.healthArchive
-        healthRecords = snapshot.healthArchive
+    private func applyBackupSnapshot(_ snapshot: ICloudBackupSnapshot, needsReconciliation: Bool = false) throws {
+        let state = PersistedHealthState(
+            records: snapshot.healthArchive.filter { !snapshot.deletedHealthWorkoutIDs.contains($0.id) },
+            deletedWorkoutIDs: snapshot.deletedHealthWorkoutIDs,
+            anchorData: healthAnchorData,
+            reconciliationVersion: needsReconciliation ? 0 : healthReconciliationVersion
+        )
+        try saveHealthState(state)
+        applyHealthState(state)
         importBatches = snapshot.importBatches
         deletedBatchDates = snapshot.deletedBatchDates
         isApplyingBackupSnapshot = true
         userName = snapshot.displayName
         isApplyingBackupSnapshot = false
-        UserDefaults.standard.set(userName, forKey: Self.userNameKey)
+        defaults.set(userName, forKey: Self.userNameKey)
         userNameUpdatedAt = snapshot.displayNameUpdatedAt
-        UserDefaults.standard.set(userNameUpdatedAt, forKey: Self.userNameUpdatedAtKey)
+        defaults.set(userNameUpdatedAt, forKey: Self.userNameUpdatedAtKey)
         saveBatches()
-        saveHealthArchive()
         saveDeletedBatchDates()
+        invalidateSummaryCache()
     }
 
     private func scheduleICloudSync() {
         guard iCloudBackupEnabled else { return }
-        Task { await syncICloudBackup(force: false) }
+        hasPendingICloudChanges = true
+        delayedICloudSyncTask?.cancel()
+        delayedICloudSyncTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            guard !Task.isCancelled else { return }
+            self?.delayedICloudSyncTask = nil
+            await self?.syncICloudBackup(force: true)
+        }
+    }
+
+    private func invalidateSummaryCache() {
+        summaryCache.removeAll()
     }
 
     private var isAutomaticICloudBackupDue: Bool {
-        guard let lastBackup = UserDefaults.standard.object(forKey: Self.lastAutomaticICloudBackupKey) as? Date else {
+        guard let lastBackup = defaults.object(forKey: Self.lastAutomaticICloudBackupKey) as? Date else {
             return true
         }
         return !Calendar.autoupdatingCurrent.isDate(lastBackup, inSameDayAs: .now)

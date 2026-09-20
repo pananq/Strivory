@@ -5,50 +5,93 @@ struct ContentView: View {
     @EnvironmentObject private var store: AppStore
     @State private var showingImporter = false
     @State private var showingImportStart = false
+#if targetEnvironment(simulator)
+    @State private var showingSettings = SimulatorTestConfiguration.hasFlag("-ShowSettings")
+#else
     @State private var showingSettings = false
+#endif
     @State private var pendingImport: CSVParseResult?
+#if targetEnvironment(simulator)
+    @State private var showingExport = SimulatorTestConfiguration.hasFlag("-ShowPoster")
+#else
     @State private var showingExport = false
+#endif
     @State private var selectedActivity: DailyActivity?
+    @State private var simulatorTemplate: ExportPosterTemplate = .editorial
+    @State private var showingSimulatorTemplateGallery: Bool = {
+#if targetEnvironment(simulator)
+        SimulatorTestConfiguration.hasFlag("-ShowTemplateGallery")
+#else
+        false
+#endif
+    }()
 
     var body: some View {
+        let summaries = homeSummaries
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    header
-                    ForEach(homeSummaries) { summary in
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    homeTitleBar
+                    syncStatus
+                    overviewHeader(summaries: summaries)
+
+                    HStack {
+                        Text(L.text("home.allYears"))
+                            .font(.headline)
+                        Spacer()
+                        Text(L.text("home.newestFirst"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(summaries) { summary in
                         YearCalendarView(summary: summary, onSelect: { selectedActivity = $0 })
                     }
                     sourceStatus
-                    ImportBatchesView()
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 16)
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("Strivory")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Task { await store.requestHealthAccessAndRefresh() }
-                    } label: {
-                        if store.isLoadingHealth { ProgressView() } else { Label(L.text("action.syncHealth"), systemImage: "heart.text.square") }
-                    }
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .bottom) {
+                Button { showingExport = true } label: {
+                    Label(L.text("home.createPoster"), systemImage: "photo.on.rectangle.angled")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { showingImportStart = true } label: { Image(systemName: "square.and.arrow.down") }
-                    Button { showingExport = true } label: { Image(systemName: "square.and.arrow.up") }
-                    Button { showingSettings = true } label: { Image(systemName: "gearshape") }
-                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+                .background(.ultraThinMaterial)
             }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.commaSeparatedText, .plainText]) { result in
                 switch result {
                 case .success(let url):
-                    let secured = url.startAccessingSecurityScopedResource()
-                    defer { if secured { url.stopAccessingSecurityScopedResource() } }
-                    do {
-                        pendingImport = CSVImporter.parse(contents: try String(contentsOf: url, encoding: .utf8), fileName: url.lastPathComponent)
-                    } catch {
-                        store.healthMessage = L.text("csv.readFailure", error.localizedDescription)
+                    let fileName = url.lastPathComponent
+                    let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+                    guard size ?? 0 <= CSVImporter.maximumFileSize else {
+                        store.healthMessage = L.text("csv.readFailure", "File exceeds the 5 MB import limit.")
+                        return
+                    }
+                    Task.detached {
+                        let secured = url.startAccessingSecurityScopedResource()
+                        defer { if secured { url.stopAccessingSecurityScopedResource() } }
+                        do {
+                            let data = try Data(contentsOf: url)
+                            guard let contents = CSVImporter.decode(data) else {
+                                throw CocoaError(.fileReadInapplicableStringEncoding)
+                            }
+                            let parsed = CSVImporter.parse(contents: contents, fileName: fileName)
+                            await MainActor.run { pendingImport = parsed }
+                        } catch {
+                            await MainActor.run {
+                                store.healthMessage = L.text("csv.readFailure", error.localizedDescription)
+                            }
+                        }
                     }
                 case .failure(let error):
                     store.healthMessage = L.text("csv.notSelected", error.localizedDescription)
@@ -63,9 +106,19 @@ struct ContentView: View {
                     showingImporter = true
                 }
             }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView {
+                    showingSettings = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        showingImportStart = true
+                    }
+                }
+            }
             .sheet(isPresented: $showingExport) {
                 ExportView(initialYear: homeSummaries.first?.year ?? CalendarSupport.year(for: .now))
+            }
+            .sheet(isPresented: $showingSimulatorTemplateGallery) {
+                PosterTemplateGallery(selection: $simulatorTemplate)
             }
             .sheet(item: $selectedActivity) { activity in
                 DayDetailView(activity: activity)
@@ -83,6 +136,30 @@ struct ContentView: View {
         }
     }
 
+    private var homeTitleBar: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Text("Strivory")
+                .font(.system(size: 38, weight: .bold, design: .default))
+                .tracking(-1)
+
+            Spacer(minLength: 12)
+
+            Button { showingSettings = true } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 21, weight: .semibold))
+                    .frame(width: 48, height: 48)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(Color(uiColor: .separator).opacity(0.2), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L.text("settings.title"))
+        }
+        .padding(.top, 2)
+    }
+
     private var homeSummaries: [YearSummary] {
         let summaries = store.availableYears
             .map { store.summary(for: $0) }
@@ -90,22 +167,71 @@ struct ContentView: View {
         return summaries.isEmpty ? [store.summary(for: CalendarSupport.year(for: .now))] : summaries
     }
 
-    private var header: some View {
-        HStack(alignment: .center) {
+    private var syncStatus: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(store.isLoadingHealth ? Color.orange : Color.accentColor)
+                .frame(width: 7, height: 7)
+            Text(store.isLoadingHealth ? L.text("home.syncing") : L.text("home.synced"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                Task { await store.requestHealthAccessAndRefresh(forceFullRefresh: true) }
+            } label: {
+                if store.isLoadingHealth {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label(L.text("home.sync"), systemImage: "arrow.clockwise")
+                        .font(.caption.weight(.medium))
+                }
+            }
+            .disabled(store.isLoadingHealth)
+        }
+    }
+
+    private func overviewHeader(summaries: [YearSummary]) -> some View {
+        let activeSummaries = summaries.filter { $0.activeDays > 0 }
+        let totalDays = activeSummaries.reduce(0) { $0 + $1.activeDays }
+        let currentYear = CalendarSupport.year(for: .now)
+        let currentDays = activeSummaries.first(where: { $0.year == currentYear })?.activeDays ?? 0
+
+        return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
+                Text(store.exportName + L.text("home.archiveSuffix"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 Text(L.text("home.slogan"))
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                 Text(L.text("home.subtitle"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
-            Text(L.text("home.yearCount", homeSummaries.filter { $0.activeDays > 0 }.count))
-                .font(.subheadline.weight(.semibold))
+
+            HStack(alignment: .lastTextBaseline, spacing: 24) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(totalDays)")
+                        .font(.system(size: 58, weight: .regular, design: .serif))
+                        .monospacedDigit()
+                    Text(L.text("home.totalActiveDays"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                homeStat(value: currentDays, label: L.text("home.thisYear"))
+                homeStat(value: activeSummaries.count, label: L.text("home.loggedYears"))
+            }
+        }
+    }
+
+    private func homeStat(value: Int, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(value)")
+                .font(.title2.weight(.semibold))
                 .monospacedDigit()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.accentColor.opacity(0.12), in: Capsule())
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -192,12 +318,15 @@ struct CalendarHeatmap: View {
     private var weeks: [[Date]] { CalendarGrid.weeks(for: summary.year) }
 
     var body: some View {
+        let calendarWeeks = weeks
+        let monthLabels = CalendarGrid.monthLabels(for: calendarWeeks)
+        let weekdayLabels = CalendarGrid.weekdayLabels
         ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 3) {
                     Text("").frame(width: 27)
-                    ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                        Text(CalendarGrid.monthLabel(for: week))
+                    ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { index, _ in
+                        Text(monthLabels[index])
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -206,9 +335,9 @@ struct CalendarHeatmap: View {
                     }
                 }
                 HStack(alignment: .top, spacing: 3) {
-                    weekdayLabels
+                    weekdayLabelsView(weekdayLabels)
                     HStack(alignment: .top, spacing: 3) {
-                        ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
+                        ForEach(Array(calendarWeeks.enumerated()), id: \.offset) { _, week in
                             VStack(spacing: 3) {
                                 ForEach(week, id: \.self) { date in
                                     dayCell(date)
@@ -221,10 +350,10 @@ struct CalendarHeatmap: View {
         }
     }
 
-    private var weekdayLabels: some View {
+    private func weekdayLabelsView(_ labels: [String]) -> some View {
         VStack(spacing: 3) {
             ForEach(0..<7, id: \.self) { index in
-                Text(index.isMultiple(of: 2) ? CalendarGrid.weekdayLabels[index] : "")
+                Text(index.isMultiple(of: 2) ? labels[index] : "")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(width: 27, height: 15, alignment: .trailing)
@@ -295,13 +424,15 @@ enum CalendarGrid {
         return result
     }
 
-    static func monthLabel(for week: [Date]) -> String {
-        guard let firstOfMonth = week.first(where: { CalendarSupport.mondayCalendar.component(.day, from: $0) == 1 }) else { return "" }
+    static func monthLabels(for weeks: [[Date]]) -> [String] {
         let formatter = DateFormatter()
         formatter.locale = L.locale
         formatter.calendar = CalendarSupport.mondayCalendar
         formatter.setLocalizedDateFormatFromTemplate("LLL")
-        return formatter.string(from: firstOfMonth)
+        return weeks.map { week in
+            guard let firstOfMonth = week.first(where: { CalendarSupport.mondayCalendar.component(.day, from: $0) == 1 }) else { return "" }
+            return formatter.string(from: firstOfMonth)
+        }
     }
 }
 
