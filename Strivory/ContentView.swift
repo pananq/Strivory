@@ -5,41 +5,68 @@ struct ContentView: View {
     @EnvironmentObject private var store: AppStore
     @State private var showingImporter = false
     @State private var showingImportStart = false
+#if targetEnvironment(simulator)
+    @State private var showingSettings = SimulatorTestConfiguration.hasFlag("-ShowSettings")
+#else
     @State private var showingSettings = false
+#endif
     @State private var pendingImport: CSVParseResult?
+#if targetEnvironment(simulator)
+    @State private var showingExport = SimulatorTestConfiguration.hasFlag("-ShowPoster")
+#else
     @State private var showingExport = false
+#endif
     @State private var selectedActivity: DailyActivity?
+    @State private var simulatorTemplate: ExportPosterTemplate = .editorial
+    @State private var showingSimulatorTemplateGallery: Bool = {
+#if targetEnvironment(simulator)
+        SimulatorTestConfiguration.hasFlag("-ShowTemplateGallery")
+#else
+        false
+#endif
+    }()
 
     var body: some View {
         let summaries = homeSummaries
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    header(yearCount: summaries.count)
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    homeTitleBar
+                    syncStatus
+                    overviewHeader(summaries: summaries)
+
+                    HStack {
+                        Text(L.text("home.allYears"))
+                            .font(.headline)
+                        Spacer()
+                        Text(L.text("home.newestFirst"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     ForEach(summaries) { summary in
                         YearCalendarView(summary: summary, onSelect: { selectedActivity = $0 })
                     }
                     sourceStatus
-                    ImportBatchesView()
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 16)
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("Strivory")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Task { await store.requestHealthAccessAndRefresh(forceFullRefresh: true) }
-                    } label: {
-                        if store.isLoadingHealth { ProgressView() } else { Label(L.text("action.syncHealth"), systemImage: "heart.text.square") }
-                    }
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .bottom) {
+                Button { showingExport = true } label: {
+                    Label(L.text("home.createPoster"), systemImage: "photo.on.rectangle.angled")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { showingImportStart = true } label: { Image(systemName: "square.and.arrow.down") }
-                    Button { showingExport = true } label: { Image(systemName: "square.and.arrow.up") }
-                    Button { showingSettings = true } label: { Image(systemName: "gearshape") }
-                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+                .background(.ultraThinMaterial)
             }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.commaSeparatedText, .plainText]) { result in
                 switch result {
@@ -79,9 +106,19 @@ struct ContentView: View {
                     showingImporter = true
                 }
             }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView {
+                    showingSettings = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        showingImportStart = true
+                    }
+                }
+            }
             .sheet(isPresented: $showingExport) {
                 ExportView(initialYear: homeSummaries.first?.year ?? CalendarSupport.year(for: .now))
+            }
+            .sheet(isPresented: $showingSimulatorTemplateGallery) {
+                PosterTemplateGallery(selection: $simulatorTemplate)
             }
             .sheet(item: $selectedActivity) { activity in
                 DayDetailView(activity: activity)
@@ -99,6 +136,30 @@ struct ContentView: View {
         }
     }
 
+    private var homeTitleBar: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Text("Strivory")
+                .font(.system(size: 38, weight: .bold, design: .default))
+                .tracking(-1)
+
+            Spacer(minLength: 12)
+
+            Button { showingSettings = true } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 21, weight: .semibold))
+                    .frame(width: 48, height: 48)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(Color(uiColor: .separator).opacity(0.2), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L.text("settings.title"))
+        }
+        .padding(.top, 2)
+    }
+
     private var homeSummaries: [YearSummary] {
         let summaries = store.availableYears
             .map { store.summary(for: $0) }
@@ -106,22 +167,71 @@ struct ContentView: View {
         return summaries.isEmpty ? [store.summary(for: CalendarSupport.year(for: .now))] : summaries
     }
 
-    private func header(yearCount: Int) -> some View {
-        HStack(alignment: .center) {
+    private var syncStatus: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(store.isLoadingHealth ? Color.orange : Color.accentColor)
+                .frame(width: 7, height: 7)
+            Text(store.isLoadingHealth ? L.text("home.syncing") : L.text("home.synced"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                Task { await store.requestHealthAccessAndRefresh(forceFullRefresh: true) }
+            } label: {
+                if store.isLoadingHealth {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label(L.text("home.sync"), systemImage: "arrow.clockwise")
+                        .font(.caption.weight(.medium))
+                }
+            }
+            .disabled(store.isLoadingHealth)
+        }
+    }
+
+    private func overviewHeader(summaries: [YearSummary]) -> some View {
+        let activeSummaries = summaries.filter { $0.activeDays > 0 }
+        let totalDays = activeSummaries.reduce(0) { $0 + $1.activeDays }
+        let currentYear = CalendarSupport.year(for: .now)
+        let currentDays = activeSummaries.first(where: { $0.year == currentYear })?.activeDays ?? 0
+
+        return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
+                Text(store.exportName + L.text("home.archiveSuffix"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 Text(L.text("home.slogan"))
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                 Text(L.text("home.subtitle"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
-            Text(L.text("home.yearCount", yearCount))
-                .font(.subheadline.weight(.semibold))
+
+            HStack(alignment: .lastTextBaseline, spacing: 24) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(totalDays)")
+                        .font(.system(size: 58, weight: .regular, design: .serif))
+                        .monospacedDigit()
+                    Text(L.text("home.totalActiveDays"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                homeStat(value: currentDays, label: L.text("home.thisYear"))
+                homeStat(value: activeSummaries.count, label: L.text("home.loggedYears"))
+            }
+        }
+    }
+
+    private func homeStat(value: Int, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(value)")
+                .font(.title2.weight(.semibold))
                 .monospacedDigit()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.accentColor.opacity(0.12), in: Capsule())
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

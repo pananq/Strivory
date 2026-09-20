@@ -9,6 +9,9 @@
 
 "batches.summary" = "%d dates · %@";
 "batches.title" = "CSV Import Batches";
+"batches.delete" = "Delete";
+"batches.empty.title" = "No imported records";
+"batches.empty.message" = "CSV imports will appear here.";
 
 "calendar.activityAccessibility" = "%@, %@";
 "calendar.noActivityAccessibility" = "%@, no workout";
@@ -76,6 +79,25 @@
 "export.template.editorial.detail" = "Warm paper, generous typography, and a classic annual report layout.";
 "export.template.nightAtlas.title" = "Night Atlas";
 "export.template.nightAtlas.detail" = "A dark data atlas with compact year bands and vivid activity colors.";
+"export.template.quietMinimal.title" = "Quiet Minimal";
+"export.template.quietMinimal.detail" = "Crisp white space and a focused, modern workout archive.";
+"export.template.quietMinimal.footer" = "A QUIET PRACTICE OF SHOWING UP";
+"export.template.motionSpectrum.title" = "Motion Spectrum";
+"export.template.motionSpectrum.detail" = "A vivid gradient field that brings every activity color forward.";
+"export.chooseTemplate" = "Choose a Template";
+"export.viewAllTemplates" = "View All";
+"export.allTemplates" = "All Templates";
+"export.templateDataHint" = "Templates only change the visual layout. Your workout data remains unchanged.";
+"export.templateFilter.all" = "All";
+"export.templateFilter.minimal" = "Minimal";
+"export.templateFilter.dark" = "Dark";
+"export.templateFilter.color" = "Color";
+"export.selectedYears" = "%d years selected";
+"export.previewScaleHint" = "Scaled proportionally from the final export canvas";
+"export.preparingPreview" = "Preparing preview…";
+"export.noYears.title" = "Choose at least one year";
+"export.noYears.message" = "Select a year above to preview your poster.";
+"export.posterName" = "Poster name: %@";
 "export.poster.activeDays" = "ACTIVE DAYS";
 "export.poster.kicker" = "MOVEMENT · %@—%@";
 "export.poster.kicker.single" = "MOVEMENT · %@";
@@ -117,6 +139,16 @@
 "home.slogan" = "A lifetime of getting moving";
 "home.subtitle" = "Your movement calendar from Apple Health and CSV files";
 "home.yearCount" = "%d years";
+"home.archiveSuffix" = "’s workout archive";
+"home.totalActiveDays" = "Total active days";
+"home.thisYear" = "This year";
+"home.loggedYears" = "Years logged";
+"home.allYears" = "Your years";
+"home.newestFirst" = "Newest first";
+"home.synced" = "Health data up to date";
+"home.syncing" = "Syncing Health data…";
+"home.sync" = "Sync";
+"home.createPoster" = "Create & Share Poster";
 
 "importStart.chooseFile" = "Choose CSV File";
 "importStart.description" = "CSV only needs a date and workout type. Each row represents one confirmed activity day; if it conflicts with Apple Health, choose whether to fill or override it during preview.";
@@ -139,6 +171,14 @@
 
 "settings.displayName" = "Display Name";
 "settings.displayNameHint" = "This name appears in the title of your exported calendar.";
+"settings.dataSection" = "Your Data";
+"settings.health" = "Apple Health";
+"settings.healthDetail" = "Connected · Automatically reads workouts";
+"settings.importCSV" = "Import Workout Records";
+"settings.importCSVDetail" = "CSV file · Date and workout type";
+"settings.importedRecords" = "Imported Records";
+"settings.importedRecordsDetail" = "%d import batches";
+"settings.personalizationSection" = "Personalize";
 "settings.exportSection" = "Export";
 "settings.iCloudBackup" = "iCloud Backup & Restore";
 "settings.iCloudBackupHint" = "When enabled, Strivory backs up Workout snapshots it has read, CSV import batches, and your display name to your private iCloud space once per day while the app is active. You can restore them after deleting the app. Sync Now always creates an immediate backup. Strivory never writes records back to Apple Health.";
