@@ -84,7 +84,6 @@ enum WorkoutCategory: String, CaseIterable, Codable, Identifiable, Hashable, Sen
         let value = label.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         func contains(_ values: [String]) -> Bool { values.contains { value.contains($0) } }
 
-        if contains(["hiit", "strength", "crossfit", "力量", "功能性", "核心", "weight", "training"]) { return .strength }
         if contains(["run", "running", "跑", "treadmill"]) { return .running }
         if contains(["cycling", "cycle", "bike", "骑行", "单车"]) { return .cycling }
         if contains(["swim", "swimming", "游泳"]) { return .swimming }
@@ -95,6 +94,7 @@ enum WorkoutCategory: String, CaseIterable, Codable, Identifiable, Hashable, Sen
         if contains(["舞", "dance", "aerobic", "操课"]) { return .dance }
         if contains(["拳", "武术", "搏击", "boxing", "martial", "kickbox"]) { return .combat }
         if contains(["划船", "rowing", "rower"]) { return .rowing }
+        if contains(["hiit", "strength training", "functional training", "cross training", "crossfit", "weight training", "力量", "功能性", "核心", "weightlifting"]) { return .strength }
         return .other
     }
 }
@@ -223,6 +223,11 @@ enum CalendarSupport {
 
     static func startOfDay(_ date: Date) -> Date {
         mondayCalendar.startOfDay(for: date)
+    }
+
+    static var contextIdentifier: String {
+        let zone = TimeZone.autoupdatingCurrent
+        return "\(zone.identifier)|\(zone.secondsFromGMT(for: .now))"
     }
 
     static func year(for date: Date) -> Int {

@@ -22,6 +22,8 @@
 		A013 /* CloudBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B019 /* CloudBackupService.swift */; };
 		A014 /* CloudKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B020 /* CloudKit.framework */; };
 		A015 /* WorkoutSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B022 /* WorkoutSync.swift */; };
+		A016 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B023 /* PrivacyInfo.xcprivacy */; };
+		A017 /* StrivoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B024 /* StrivoryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,7 +47,20 @@
 		B020 /* CloudKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CloudKit.framework; path = System/Library/Frameworks/CloudKit.framework; sourceTree = SDKROOT; };
 		B021 /* StrivoryDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StrivoryDebug.entitlements; sourceTree = "<group>"; };
 		B022 /* WorkoutSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSync.swift; sourceTree = "<group>"; };
+		B023 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B024 /* StrivoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrivoryTests.swift; sourceTree = "<group>"; };
+		B025 /* StrivoryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StrivoryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXContainerItemProxy section */
+		H001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E001;
+			remoteInfo = Strivory;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		C001 /* Frameworks */ = {
@@ -57,6 +72,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -64,6 +86,7 @@
 			isa = PBXGroup;
 			children = (
 				D002 /* Strivory */,
+				D005 /* StrivoryTests */,
 				D003 /* Frameworks */,
 				D004 /* Products */,
 			);
@@ -83,6 +106,7 @@
 				B022 /* WorkoutSync.swift */,
 				B008 /* Strivory.entitlements */,
 				B021 /* StrivoryDebug.entitlements */,
+				B023 /* PrivacyInfo.xcprivacy */,
 				B011 /* Assets.xcassets */,
 				B012 /* LaunchScreen.storyboard */,
 				B013 /* Localizable.strings */,
@@ -104,8 +128,17 @@
 			isa = PBXGroup;
 			children = (
 				B010 /* Strivory.app */,
+				B025 /* StrivoryTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D005 /* StrivoryTests */ = {
+			isa = PBXGroup;
+			children = (
+				B024 /* StrivoryTests.swift */,
+			);
+			path = StrivoryTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -128,6 +161,24 @@
 			productReference = B010 /* Strivory.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E002 /* StrivoryTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F004 /* Build configuration list for PBXNativeTarget "StrivoryTests" */;
+			buildPhases = (
+				C004 /* Sources */,
+				C005 /* Frameworks */,
+				C006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				H002 /* PBXTargetDependency */,
+			);
+			name = StrivoryTests;
+			productName = StrivoryTests;
+			productReference = B025 /* StrivoryTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -140,6 +191,10 @@
 				TargetAttributes = {
 					E001 = {
 						CreatedOnToolsVersion = 26.2;
+					};
+					E002 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = E001;
 					};
 				};
 			};
@@ -158,6 +213,7 @@
 			projectRoot = "";
 			targets = (
 				E001 /* Strivory */,
+				E002 /* StrivoryTests */,
 			);
 		};
 /* End PBXProject section */
@@ -171,6 +227,14 @@
 				A010 /* LaunchScreen.storyboard in Resources */,
 				A011 /* Localizable.strings in Resources */,
 				A012 /* InfoPlist.strings in Resources */,
+				A016 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -193,7 +257,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A017 /* StrivoryTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		H002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E001 /* Strivory */;
+			targetProxy = H001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		B013 /* Localizable.strings */ = {
@@ -322,7 +402,7 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pananq.strivory.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -352,7 +432,7 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pananq.strivory.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -360,6 +440,44 @@
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		G005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = KC3GA3LQ4C;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pananq.strivory.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Strivory.app/Strivory";
+			};
+			name = Debug;
+		};
+		G006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = KC3GA3LQ4C;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pananq.strivory.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Strivory.app/Strivory";
 			};
 			name = Release;
 		};
@@ -380,6 +498,15 @@
 			buildConfigurations = (
 				G003 /* Debug */,
 				G004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F004 /* Build configuration list for PBXNativeTarget "StrivoryTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G005 /* Debug */,
+				G006 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

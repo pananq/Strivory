@@ -29,7 +29,7 @@ Strivory 的 iCloud 功能备份应用自身保存的数据：已读取的 Worko
 - iCloud 请求返回时，会与此刻的本地数据再次合并，保留网络等待期间读取的 Workout、CSV 变更和显示名称，并补做备份。
 - HealthKit 返回的已删除 Workout UUID 会保存在本机和备份中。删除标记优先于记录本身，旧备份不能重新带回这些 UUID。CSV 批次继续使用独立的批次删除标记。
 - Workout、本机 HealthKit 查询进度和删除标记写在同一个原子保存的文件中；写入失败时不会推进查询进度，下次可以重新处理同一批变更。
-- 更新后的首次健康同步会重新读取完整历史，补回旧版本可能漏掉的记录。完成后自动刷新仍使用增量查询；左上角“同步健康数据”会主动重新核对完整历史。
+- 更新后的首次健康同步会重新读取完整历史，补回旧版本可能漏掉的记录，并移除当前 Health 快照中已不存在的旧记录。完成后自动刷新仍使用增量查询；首页状态栏右侧的“同步”会主动重新核对完整历史。
 - 旧版文件和 UserDefaults 存档会迁移，旧 iCloud JSON 仍可读取。新增信息位于原有 `payload` 内，不需要在 CloudKit Dashboard 新增字段或重新部署 schema。
 - 完整查询为空时保留本地和恢复的历史，不根据“没有读到”推断删除。HealthKit 不透露读取权限是否被拒绝；只有明确返回的删除 UUID 才形成删除标记。Apple 可能清理较早的删除通知，因此不能保证自动识别修复前已丢失删除通知的全部旧记录。参见 [HKDeletedObject](https://developer.apple.com/documentation/healthkit/hkdeletedobject) 和 [HealthKit 权限说明](https://developer.apple.com/documentation/healthkit/authorizing-access-to-health-data)。
 
@@ -46,7 +46,7 @@ bash Tests/run-sync-regressions.sh
 ### 真机验证本次问题
 
 1. 使用同一 Bundle ID 覆盖安装修复版本，保留现有本地记录，并保持原来的 iCloud 环境。
-2. 确认允许读取体能训练，点击左上角“同步健康数据”；检查 9 月 19 日的游泳（不少于 10 分钟）是否恢复显示。
+2. 确认允许读取体能训练，点击首页状态栏右侧的“同步”；检查 9 月 19 日的游泳（不少于 10 分钟）是否恢复显示。
 3. 确认 9 月 14 日只保留尚未删除的足球记录；同一天仍有有效运动时，年历格子继续显示是正常的。
 4. 执行 iCloud“立即同步”，等待完成后重启 App，确认游泳不消失、已删除记录不回来。
 5. 再次读取健康数据和导出海报，确认首页、当天详情、年度统计和海报一致。

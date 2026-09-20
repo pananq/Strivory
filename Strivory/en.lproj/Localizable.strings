@@ -31,6 +31,7 @@
 "category.swimming" = "Swimming";
 
 "csv.notSelected" = "No CSV selected: %@";
+"csv.persistenceFailure" = "Could not save imported records: %@";
 "csv.readFailure" = "Could not read CSV: %@";
 "csv.strategy.override.detail" = "The CSV activity becomes the primary workout for that day.";
 "csv.strategy.override.title" = "CSV overrides the day";
@@ -41,9 +42,12 @@
 
 "csvError.columns" = "Not enough columns to read the date and workout type.";
 "csvError.date" = "Date “%@” is invalid or in the future.";
+"csvError.dateRange" = "Date “%@” is earlier than the supported year %d.";
 "csvError.duplicateDate" = "Date %@ appears more than once in this file; keep one row and try again.";
 "csvError.emptyFile" = "The file is empty.";
+"csvError.fileTooLarge" = "The file exceeds the 5 MB import limit.";
 "csvError.header" = "The CSV needs date and workout_type columns.";
+"csvError.tooManyRecords" = "A single import can contain at most %d records.";
 "csvError.type" = "Workout type cannot be empty.";
 
 "csvReview.actionRequired" = "Action Required";
@@ -113,8 +117,10 @@
 "health.storageFailure" = "Workout data could not be saved or loaded. Please try again: %@";
 "health.unavailable" = "Apple Health is unavailable on this device.";
 "health.updated" = "Updated %d eligible workouts.";
+"heatmap.day.accessibility" = "%@, %@, %@";
 
 "icloud.error.account" = "Sign in to iCloud to back up or restore.";
+"icloud.error.backupTooLarge" = "The backup is too large for a single iCloud archive. Remove oversized CSV import batches and try again.";
 "icloud.error.malformed" = "The iCloud backup could not be read.";
 "icloud.error.configuration" = "iCloud Backup is not configured yet. Run the latest build from Xcode once, then deploy the CloudKit schema before TestFlight or App Store testing.";
 "icloud.error.container" = "The iCloud container is unavailable. In Xcode, confirm iCloud + CloudKit is enabled and the container is iCloud.com.pananq.strivory.";
@@ -145,6 +151,8 @@
 "home.loggedYears" = "Years logged";
 "home.allYears" = "Your years";
 "home.newestFirst" = "Newest first";
+"home.empty.title" = "No workouts yet";
+"home.empty.message" = "Sync Apple Health or import a CSV file to create your first movement calendar.";
 "home.synced" = "Health data up to date";
 "home.syncing" = "Syncing Health data…";
 "home.sync" = "Sync";
@@ -181,12 +189,13 @@
 "settings.personalizationSection" = "Personalize";
 "settings.exportSection" = "Export";
 "settings.iCloudBackup" = "iCloud Backup & Restore";
-"settings.iCloudBackupHint" = "When enabled, Strivory backs up Workout snapshots it has read, CSV import batches, and your display name to your private iCloud space once per day while the app is active. You can restore them after deleting the app. Sync Now always creates an immediate backup. Strivory never writes records back to Apple Health.";
+"settings.iCloudBackupHint" = "When enabled, Strivory performs a daily backup check and also backs up local changes after they occur. Workout snapshots, CSV import batches, and your display name are stored in your private iCloud space. Sync Now creates an immediate backup. Strivory never writes records back to Apple Health.";
 "settings.iCloudSection" = "Data Backup";
 "settings.language" = "App Language";
 "settings.languageHint" = "This controls the language used by Strivory and exported images.";
 "settings.languageSection" = "Language";
 "settings.navigationTitle" = "Settings";
+"settings.title" = "Settings";
 "settings.privacyLocal" = "Data stays on this device by default; when enabled, iCloud Backup stores it in your private iCloud space.";
 "settings.privacyNoWrite" = "Strivory never writes records back to Apple Health.";
 "settings.privacySection" = "Privacy";

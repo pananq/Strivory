@@ -4,11 +4,13 @@ import Foundation
 enum ICloudBackupError: LocalizedError, Equatable {
     case accountUnavailable
     case malformedBackup
+    case backupTooLarge
 
     var errorDescription: String? {
         switch self {
         case .accountUnavailable: return L.text("icloud.error.account")
         case .malformedBackup: return L.text("icloud.error.malformed")
+        case .backupTooLarge: return L.text("icloud.error.backupTooLarge")
         }
     }
 }
@@ -23,6 +25,7 @@ actor CloudBackupService: CloudBackupProviding {
     private let recordID = CKRecord.ID(recordName: "strivory-backup-v1")
     private let recordType = "StrivoryBackup"
     private let payloadField = "payload"
+    private let maximumPayloadSize = 45 * 1_024 * 1_024
 
     func isAccountAvailable() async -> Bool {
         do {
@@ -79,6 +82,7 @@ actor CloudBackupService: CloudBackupProviding {
 
     private func save(_ snapshot: ICloudBackupSnapshot, to record: CKRecord) async throws {
         let data = try JSONEncoder().encode(snapshot)
+        guard data.count <= maximumPayloadSize else { throw ICloudBackupError.backupTooLarge }
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("strivory-cloud-backup", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

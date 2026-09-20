@@ -44,8 +44,18 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    ForEach(summaries) { summary in
-                        YearCalendarView(summary: summary, onSelect: { selectedActivity = $0 })
+                    if summaries.isEmpty {
+                        ContentUnavailableView(
+                            L.text("home.empty.title"),
+                            systemImage: "figure.run.circle",
+                            description: Text(L.text("home.empty.message"))
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    } else {
+                        ForEach(summaries) { summary in
+                            YearCalendarView(summary: summary, onSelect: { selectedActivity = $0 })
+                        }
                     }
                     sourceStatus
                 }
@@ -74,7 +84,7 @@ struct ContentView: View {
                     let fileName = url.lastPathComponent
                     let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
                     guard size ?? 0 <= CSVImporter.maximumFileSize else {
-                        store.healthMessage = L.text("csv.readFailure", "File exceeds the 5 MB import limit.")
+                        store.healthMessage = L.text("csv.readFailure", L.text("csvError.fileTooLarge"))
                         return
                     }
                     Task.detached {
@@ -82,6 +92,9 @@ struct ContentView: View {
                         defer { if secured { url.stopAccessingSecurityScopedResource() } }
                         do {
                             let data = try Data(contentsOf: url)
+                            guard data.count <= CSVImporter.maximumFileSize else {
+                                throw CSVImportReadError.fileTooLarge
+                            }
                             guard let contents = CSVImporter.decode(data) else {
                                 throw CocoaError(.fileReadInapplicableStringEncoding)
                             }
@@ -161,10 +174,9 @@ struct ContentView: View {
     }
 
     private var homeSummaries: [YearSummary] {
-        let summaries = store.availableYears
+        store.availableYears
             .map { store.summary(for: $0) }
             .filter { $0.activeDays > 0 }
-        return summaries.isEmpty ? [store.summary(for: CalendarSupport.year(for: .now))] : summaries
     }
 
     private var syncStatus: some View {
@@ -246,6 +258,12 @@ struct ContentView: View {
                 .background(.background, in: RoundedRectangle(cornerRadius: 14))
         }
     }
+}
+
+private enum CSVImportReadError: LocalizedError {
+    case fileTooLarge
+
+    var errorDescription: String? { L.text("csvError.fileTooLarge") }
 }
 
 struct YearCalendarView: View {
@@ -387,17 +405,29 @@ struct CalendarHeatmap: View {
                 let weekIndex = Int(value.location.x / step)
                 let dayIndex = Int(value.location.y / step)
                 guard weeks.indices.contains(weekIndex),
-                      weeks[weekIndex].indices.contains(dayIndex),
-                      value.location.x.truncatingRemainder(dividingBy: step) <= cellSize,
-                      value.location.y.truncatingRemainder(dividingBy: step) <= cellSize else { return }
+                      weeks[weekIndex].indices.contains(dayIndex) else { return }
                 let day = CalendarSupport.startOfDay(weeks[weekIndex][dayIndex])
                 if let activity = summary.dailyActivities[day] {
                     onSelect?(activity)
                 }
             }
         )
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(L.text("year.card.title", CalendarSupport.yearText(summary.year)))
+        .accessibilityChildren {
+            ForEach(summary.dailyActivities.values.sorted { $0.date < $1.date }) { activity in
+                Button {
+                    onSelect?(activity)
+                } label: {
+                    Text(L.text(
+                        "heatmap.day.accessibility",
+                        CalendarSupport.dateText(activity.date, style: .full),
+                        activity.category.title,
+                        activity.source == .healthKit ? L.text("source.health") : L.text("source.csv")
+                    ))
+                }
+            }
+        }
     }
 
     private func fillColor(for date: Date, isInYear: Bool) -> Color {
@@ -421,7 +451,7 @@ enum CalendarGrid {
     private static var layoutCache: [String: Layout] = [:]
 
     static func layout(for year: Int) -> Layout {
-        let key = "\(year)|\(L.locale.identifier)"
+        let key = "\(year)|\(L.locale.identifier)|\(CalendarSupport.contextIdentifier)"
         if let cached = layoutCache[key] { return cached }
         let weeks = makeWeeks(for: year)
         let layout = Layout(

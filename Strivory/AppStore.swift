@@ -31,7 +31,14 @@ final class AppStore: ObservableObject {
         didSet {
             defaults.set(iCloudBackupEnabled, forKey: Self.iCloudBackupEnabledKey)
             if iCloudBackupEnabled { scheduleICloudSync() }
-            else { iCloudBackupState = .disabled }
+            else {
+                delayedICloudSyncTask?.cancel()
+                delayedICloudSyncTask = nil
+                iCloudRetryTask?.cancel()
+                iCloudRetryTask = nil
+                iCloudRetryAttempt = 0
+                iCloudBackupState = .disabled
+            }
         }
     }
 
@@ -39,9 +46,11 @@ final class AppStore: ObservableObject {
     private let cloudBackup: any CloudBackupProviding
     private let defaults: UserDefaults
     private let archiveURL: URL?
+    private let importArchiveURL: URL?
     private static let batchesKey = "strivory.csv.batches"
     private static let healthArchiveKey = "strivory.health.archive"
     private static let healthArchiveFileName = "health-archive.json"
+    private static let importBatchesFileName = "import-batches.json"
     private static let healthAnchorKey = "strivory.health.anchor"
     private static let deletedBatchDatesKey = "strivory.csv.deleted-batches"
     private static let userNameKey = "strivory.user.name"
@@ -57,8 +66,13 @@ final class AppStore: ObservableObject {
     private var userNameUpdatedAt: Date
     private var isApplyingBackupSnapshot = false
     private var summaryCache: [Int: YearSummary] = [:]
+    private var summaryCacheIsValid = false
+    private var calendarRecordsCache: [WorkoutRecord]?
+    private var calendarContextIdentifier: String
     private var hasPendingICloudChanges = false
     private var delayedICloudSyncTask: Task<Void, Never>?
+    private var iCloudRetryTask: Task<Void, Never>?
+    private var iCloudRetryAttempt = 0
 
     init(healthKit: any HealthKitProviding, cloudBackup: any CloudBackupProviding,
          defaults: UserDefaults = .standard, archiveURL: URL? = nil, prepareBackupOnLaunch: Bool = true) {
@@ -66,6 +80,10 @@ final class AppStore: ObservableObject {
         self.cloudBackup = cloudBackup
         self.defaults = defaults
         self.archiveURL = archiveURL
+        self.importArchiveURL = archiveURL.map {
+            $0.deletingLastPathComponent().appendingPathComponent(Self.importBatchesFileName)
+        }
+        self.calendarContextIdentifier = CalendarSupport.contextIdentifier
         language = AppLanguage(rawValue: defaults.string(forKey: AppLanguage.storageKey) ?? "") ?? .simplifiedChinese
         userName = defaults.string(forKey: Self.userNameKey) ?? L.text("export.defaultName")
         userNameUpdatedAt = defaults.object(forKey: Self.userNameUpdatedAtKey) as? Date
@@ -101,10 +119,13 @@ final class AppStore: ObservableObject {
                 healthMessage = L.text("health.noReadableData")
                 return
             }
-            let next = persistedHealthState.applying(result, isFullRefresh: fullRefresh)
+            let current = persistedHealthState
+            let next = current.applying(result, isFullRefresh: fullRefresh)
             let changed = next.records != healthArchive || next.deletedWorkoutIDs != deletedHealthWorkoutIDs
-            try saveHealthState(next)
-            applyHealthState(next)
+            if next != current {
+                try saveHealthState(next)
+                applyHealthState(next)
+            }
             if changed { backupRevision += 1 }
             healthMessage = healthRecords.isEmpty
                 ? L.text("health.empty")
@@ -121,17 +142,33 @@ final class AppStore: ObservableObject {
             WorkoutRecord(id: $0.id, startDate: $0.startDate, category: $0.category, duration: $0.duration, activeEnergy: 0, source: .csv, batchID: batchID)
         }
         guard !records.isEmpty else { return }
+        let previous = importBatches
         importBatches.append(CSVImportBatch(id: batchID, name: result.fileName, createdAt: .now, strategy: strategy, records: records))
-        saveBatches()
+        do {
+            try saveBatches()
+        } catch {
+            importBatches = previous
+            healthMessage = L.text("csv.persistenceFailure", error.localizedDescription)
+            return
+        }
         invalidateSummaryCache()
         backupRevision += 1
         scheduleICloudSync()
     }
 
     func deleteBatch(_ batch: CSVImportBatch) {
+        let previousBatches = importBatches
+        let previousDeletedDates = deletedBatchDates
         importBatches.removeAll { $0.id == batch.id }
         deletedBatchDates[batch.id.uuidString] = .now
-        saveBatches()
+        do {
+            try saveBatches()
+        } catch {
+            importBatches = previousBatches
+            deletedBatchDates = previousDeletedDates
+            healthMessage = L.text("csv.persistenceFailure", error.localizedDescription)
+            return
+        }
         saveDeletedBatchDates()
         invalidateSummaryCache()
         backupRevision += 1
@@ -139,26 +176,48 @@ final class AppStore: ObservableObject {
     }
 
     func summary(for year: Int) -> YearSummary {
+        refreshCalendarContextIfNeeded()
+        rebuildSummaryCacheIfNeeded()
         if let cached = summaryCache[year] { return cached }
-        let summary = buildSummary(for: year)
+        let summary = YearSummary(year: year, dailyActivities: [:], categoryCounts: [:], topCategories: [])
         summaryCache[year] = summary
         return summary
     }
 
-    private func buildSummary(for year: Int) -> YearSummary {
+    private func rebuildSummaryCacheIfNeeded() {
+        guard !summaryCacheIsValid else { return }
         let calendar = CalendarSupport.mondayCalendar
-        var healthByDay: [Date: [WorkoutRecord]] = [:]
-        for record in calendarRecords where calendar.component(.year, from: record.startDate) == year {
-            healthByDay[CalendarSupport.startOfDay(record.startDate), default: []].append(record)
+        var healthByYear: [Int: [Date: [WorkoutRecord]]] = [:]
+        for record in calendarRecords {
+            let year = calendar.component(.year, from: record.startDate)
+            healthByYear[year, default: [:]][CalendarSupport.startOfDay(record.startDate), default: []].append(record)
         }
 
-        var importedByDay: [Date: [(record: WorkoutRecord, batch: CSVImportBatch)]] = [:]
+        var importedByYear: [Int: [Date: [(record: WorkoutRecord, batch: CSVImportBatch)]]] = [:]
         for batch in importBatches {
-            for record in batch.records where calendar.component(.year, from: record.startDate) == year {
-                importedByDay[CalendarSupport.startOfDay(record.startDate), default: []].append((record, batch))
+            for record in batch.records {
+                let year = calendar.component(.year, from: record.startDate)
+                importedByYear[year, default: [:]][CalendarSupport.startOfDay(record.startDate), default: []].append((record, batch))
             }
         }
 
+        summaryCache.removeAll(keepingCapacity: true)
+        let years = Set(healthByYear.keys).union(importedByYear.keys)
+        for year in years {
+            summaryCache[year] = makeSummary(
+                for: year,
+                healthByDay: healthByYear[year] ?? [:],
+                importedByDay: importedByYear[year] ?? [:]
+            )
+        }
+        summaryCacheIsValid = true
+    }
+
+    private func makeSummary(
+        for year: Int,
+        healthByDay: [Date: [WorkoutRecord]],
+        importedByDay: [Date: [(record: WorkoutRecord, batch: CSVImportBatch)]]
+    ) -> YearSummary {
         let allDays = Set(healthByDay.keys).union(importedByDay.keys)
         var dailyActivities: [Date: DailyActivity] = [:]
         for day in allDays {
@@ -180,17 +239,18 @@ final class AppStore: ObservableObject {
         let counts = dailyActivities.values.reduce(into: [WorkoutCategory: Int]()) { partial, activity in
             partial[activity.category, default: 0] += 1
         }
-        let top = counts.sorted { lhs, rhs in
+        let top = counts.filter { $0.key != .other }.sorted { lhs, rhs in
             lhs.value == rhs.value ? lhs.key.rawValue < rhs.key.rawValue : lhs.value > rhs.value
         }.prefix(4).map(\.key)
         return YearSummary(year: year, dailyActivities: dailyActivities, categoryCounts: counts, topCategories: top)
     }
 
     var availableYears: [Int] {
-        let years = Set(calendarRecords.map { CalendarSupport.year(for: $0.startDate) })
-            .union(importBatches.flatMap { $0.records.map { CalendarSupport.year(for: $0.startDate) } })
+        refreshCalendarContextIfNeeded()
+        rebuildSummaryCacheIfNeeded()
+        let years = Set(summaryCache.keys)
         let current = CalendarSupport.year(for: .now)
-        return Array(years.union([current])).sorted(by: >)
+        return (years.isEmpty ? [current] : Array(years)).sorted(by: >)
     }
 
     var exportName: String {
@@ -245,6 +305,10 @@ final class AppStore: ObservableObject {
     /// Routine checks are daily; local changes and manual backups bypass the limit.
     func syncICloudBackup(force: Bool) async {
         guard iCloudBackupEnabled else { return }
+        if force {
+            iCloudRetryTask?.cancel()
+            iCloudRetryTask = nil
+        }
         if isSyncingICloud {
             hasPendingICloudChanges = true
             return
@@ -268,15 +332,20 @@ final class AppStore: ObservableObject {
             hasICloudBackup = true
             iCloudBackupState = .ready(lastBackup: merged.updatedAt)
             iCloudErrorMessage = nil
+            iCloudRetryAttempt = 0
+            iCloudRetryTask?.cancel()
+            iCloudRetryTask = nil
             defaults.set(Date.now, forKey: Self.lastAutomaticICloudBackupKey)
         } catch let error as ICloudBackupError where error == .accountUnavailable {
             hasPendingICloudChanges = true
             iCloudBackupState = .unavailable
             recordICloudFailure(error)
+            scheduleICloudRetry(after: error)
         } catch {
             hasPendingICloudChanges = true
             iCloudBackupState = .failed
             recordICloudFailure(error)
+            scheduleICloudRetry(after: error)
         }
     }
 
@@ -319,6 +388,9 @@ final class AppStore: ObservableObject {
             if leftDuration == rightDuration {
                 let leftEnergy = lhs.value.reduce(0) { $0 + $1.activeEnergy }
                 let rightEnergy = rhs.value.reduce(0) { $0 + $1.activeEnergy }
+                if leftEnergy == rightEnergy {
+                    return lhs.key.rawValue < rhs.key.rawValue
+                }
                 return leftEnergy < rightEnergy
             }
             return leftDuration < rightDuration
@@ -326,23 +398,49 @@ final class AppStore: ObservableObject {
         return DailyActivity(date: day, category: best.key, source: .healthKit, records: best.value)
     }
 
-    private func saveBatches() {
-        if let data = try? JSONEncoder().encode(importBatches) {
-            defaults.set(data, forKey: Self.batchesKey)
+    private func saveBatches(_ batches: [CSVImportBatch]) throws {
+        do {
+            let fileURL = try importArchiveURL ?? Self.importBatchesFileURL()
+            let data = try JSONEncoder().encode(batches)
+            var options: Data.WritingOptions = .atomic
+            #if os(iOS)
+            options.insert(.completeFileProtectionUntilFirstUserAuthentication)
+            #endif
+            try data.write(to: fileURL, options: options)
+            defaults.removeObject(forKey: Self.batchesKey)
+        } catch {
+            throw HealthPersistenceError.saveFailed(error.localizedDescription)
         }
     }
 
+    private func saveBatches() throws {
+        try saveBatches(importBatches)
+    }
+
     private func loadBatches() {
-        guard let data = defaults.data(forKey: Self.batchesKey),
-              let decoded = try? JSONDecoder().decode([CSVImportBatch].self, from: data) else { return }
-        importBatches = decoded
+        do {
+            let fileURL = try importArchiveURL ?? Self.importBatchesFileURL()
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                let data = try Data(contentsOf: fileURL)
+                importBatches = try JSONDecoder().decode([CSVImportBatch].self, from: data)
+                return
+            }
+            guard let legacyData = defaults.data(forKey: Self.batchesKey) else { return }
+            importBatches = try JSONDecoder().decode([CSVImportBatch].self, from: legacyData)
+            try saveBatches()
+        } catch {
+            healthMessage = L.text("csv.persistenceFailure", error.localizedDescription)
+        }
     }
 
     private var calendarRecords: [WorkoutRecord] {
+        if let calendarRecordsCache { return calendarRecordsCache }
         var byID = Dictionary(uniqueKeysWithValues: healthArchive.map { ($0.id, $0) })
         for record in healthRecords { byID[record.id] = record }
         for id in deletedHealthWorkoutIDs { byID.removeValue(forKey: id) }
-        return byID.values.sorted { $0.startDate < $1.startDate }
+        let records = byID.values.sorted { $0.startDate < $1.startDate }
+        calendarRecordsCache = records
+        return records
     }
 
     private var persistedHealthState: PersistedHealthState {
@@ -404,7 +502,7 @@ final class AppStore: ObservableObject {
         try saveHealthState(state)
     }
 
-    private static func healthArchiveFileURL() throws -> URL {
+    private static func applicationSupportDirectory() throws -> URL {
         let directory = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -413,7 +511,15 @@ final class AppStore: ObservableObject {
         )
         let appDirectory = directory.appendingPathComponent("Strivory", isDirectory: true)
         try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
-        return appDirectory.appendingPathComponent(healthArchiveFileName)
+        return appDirectory
+    }
+
+    private static func healthArchiveFileURL() throws -> URL {
+        try applicationSupportDirectory().appendingPathComponent(healthArchiveFileName)
+    }
+
+    private static func importBatchesFileURL() throws -> URL {
+        try applicationSupportDirectory().appendingPathComponent(importBatchesFileName)
     }
 
     private func saveDeletedBatchDates() {
@@ -447,7 +553,17 @@ final class AppStore: ObservableObject {
             anchorData: healthAnchorData,
             reconciliationVersion: needsReconciliation ? 0 : healthReconciliationVersion
         )
-        try saveHealthState(state)
+        // Persist both archives before publishing either one to the UI. If the
+        // second write fails, restore the previous import file so a restart
+        // cannot observe a half-applied CloudKit snapshot.
+        let previousBatches = importBatches
+        try saveBatches(snapshot.importBatches)
+        do {
+            try saveHealthState(state)
+        } catch {
+            try? saveBatches(previousBatches)
+            throw error
+        }
         applyHealthState(state)
         importBatches = snapshot.importBatches
         deletedBatchDates = snapshot.deletedBatchDates
@@ -457,7 +573,6 @@ final class AppStore: ObservableObject {
         defaults.set(userName, forKey: Self.userNameKey)
         userNameUpdatedAt = snapshot.displayNameUpdatedAt
         defaults.set(userNameUpdatedAt, forKey: Self.userNameUpdatedAtKey)
-        saveBatches()
         saveDeletedBatchDates()
         invalidateSummaryCache()
     }
@@ -474,8 +589,32 @@ final class AppStore: ObservableObject {
         }
     }
 
+    private func scheduleICloudRetry(after error: Error) {
+        guard iCloudBackupEnabled else { return }
+        iCloudRetryTask?.cancel()
+        iCloudRetryAttempt += 1
+        let serverDelay = (error as? CKError)?.userInfo[CKErrorRetryAfterKey] as? TimeInterval
+        let fallbackDelay = min(300, pow(2, Double(min(iCloudRetryAttempt, 6))) * 5)
+        let delay = max(5, serverDelay ?? fallbackDelay)
+        iCloudRetryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard !Task.isCancelled else { return }
+            self?.iCloudRetryTask = nil
+            await self?.syncICloudBackup(force: false)
+        }
+    }
+
     private func invalidateSummaryCache() {
         summaryCache.removeAll()
+        summaryCacheIsValid = false
+        calendarRecordsCache = nil
+    }
+
+    private func refreshCalendarContextIfNeeded() {
+        let current = CalendarSupport.contextIdentifier
+        guard current != calendarContextIdentifier else { return }
+        calendarContextIdentifier = current
+        invalidateSummaryCache()
     }
 
     private var isAutomaticICloudBackupDue: Bool {

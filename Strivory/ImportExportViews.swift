@@ -15,6 +15,14 @@ private enum PhotoLibraryWriter {
     }
 }
 
+private actor PNGEncodingWorker {
+    static let shared = PNGEncodingWorker()
+
+    func data(for image: UIImage) -> Data? {
+        autoreleasepool { image.pngData() }
+    }
+}
+
 struct CSVTemplateDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.commaSeparatedText] }
     let text: String
@@ -325,7 +333,6 @@ struct ExportView: View {
     }()
     @State private var previewImage: UIImage?
     @State private var generatedImage: UIImage?
-    @State private var previewRevision = 0
     @State private var generatingAction: ExportAction?
     @State private var showingShareSheet = false
 #if targetEnvironment(simulator)
@@ -367,11 +374,8 @@ struct ExportView: View {
                     selectedYears = Set(years.prefix(10))
                     if selectedYears.isEmpty { selectedYears = [initialYear] }
                 }
-                refreshPreview()
             }
-            .onChange(of: selectedYears) { _, _ in refreshPreview() }
-            .onChange(of: selectedTemplate) { _, _ in refreshPreview() }
-            .onChange(of: store.userName) { _, _ in refreshPreview() }
+            .task(id: previewIdentity) { await refreshPreview() }
             .sheet(isPresented: $showingTemplateGallery) {
                 PosterTemplateGallery(selection: $selectedTemplate)
             }
@@ -380,6 +384,9 @@ struct ExportView: View {
             }
             .sheet(isPresented: $showingShareSheet) {
                 if let generatedImage { ShareSheet(items: [generatedImage]) }
+            }
+            .onChange(of: showingShareSheet) { _, isShowing in
+                if !isShowing { generatedImage = nil }
             }
             .alert(item: $saveResult) { result in
                 Alert(title: Text(result.title), message: Text(result.message), dismissButton: .default(Text(L.text("action.ok"))))
@@ -584,22 +591,29 @@ struct ExportView: View {
         }
     }
 
+    private struct PreviewIdentity: Hashable {
+        let years: [Int]
+        let template: ExportPosterTemplate
+        let name: String
+    }
+
+    private var previewIdentity: PreviewIdentity {
+        PreviewIdentity(years: selectedYears.sorted(by: >), template: selectedTemplate, name: store.exportName)
+    }
+
     @MainActor
-    private func refreshPreview() {
-        previewRevision += 1
-        let revision = previewRevision
-        let exportSummaries = summaries
-        guard !exportSummaries.isEmpty else {
+    private func refreshPreview() async {
+        let identity = previewIdentity
+        guard !identity.years.isEmpty else {
             previewImage = nil
             return
         }
-        previewImage = nil
-        Task { @MainActor in
-            await Task.yield()
-            let image = renderPoster(summaries: exportSummaries, scale: 0.42)
-            guard revision == previewRevision else { return }
-            previewImage = image
-        }
+        do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+        guard !Task.isCancelled else { return }
+        let exportSummaries = identity.years.map { store.summary(for: $0) }
+        let image = renderPoster(summaries: exportSummaries, scale: 1)
+        guard !Task.isCancelled, identity == previewIdentity else { return }
+        previewImage = image
     }
 
     private enum ExportAction: Equatable { case save, share }
@@ -607,26 +621,24 @@ struct ExportView: View {
     @MainActor
     private func generateImage(for action: ExportAction) {
         guard generatingAction == nil else { return }
-        if action == .share, let previewImage {
-            generatedImage = previewImage
-            showingShareSheet = true
-            return
-        }
         generatingAction = action
         let exportSummaries = summaries
         let scale: CGFloat = exportSummaries.count > 5 ? 1.25 : 2
         Task { @MainActor in
             await Task.yield()
             let image = renderPoster(summaries: exportSummaries, scale: scale)
-            generatedImage = image
-            generatingAction = nil
             guard let image else {
+                generatingAction = nil
                 saveResult = SaveResult(title: L.text("photoSave.failed.title"), message: L.text("photoSave.imageDataFailure"))
                 return
             }
             switch action {
-            case .save: saveToPhotoLibrary(image)
-            case .share: showingShareSheet = true
+            case .save:
+                saveToPhotoLibrary(image)
+            case .share:
+                generatedImage = image
+                generatingAction = nil
+                showingShareSheet = true
             }
         }
     }
@@ -659,18 +671,24 @@ struct ExportView: View {
     @MainActor
     private func completePhotoAuthorization(_ authorization: PHAuthorizationStatus, image: UIImage) {
         guard authorization == .authorized || authorization == .limited else {
+            generatingAction = nil
             saveResult = SaveResult(title: L.text("photoSave.unavailable.title"), message: L.text("photoSave.unavailable.message"))
             return
         }
-        guard let imageData = image.pngData() else {
-            saveResult = SaveResult(title: L.text("photoSave.failed.title"), message: L.text("photoSave.imageDataFailure"))
-            return
-        }
-        PhotoLibraryWriter.savePNGData(imageData) { success, error in
-            Task { @MainActor in
-                saveResult = success
-                    ? SaveResult(title: L.text("photoSave.success.title"), message: L.text("photoSave.success.message"))
-                    : SaveResult(title: L.text("photoSave.failed.title"), message: error?.localizedDescription ?? L.text("photoSave.failed.message"))
+        Task {
+            guard let imageData = await PNGEncodingWorker.shared.data(for: image) else {
+                generatingAction = nil
+                saveResult = SaveResult(title: L.text("photoSave.failed.title"), message: L.text("photoSave.imageDataFailure"))
+                return
+            }
+            PhotoLibraryWriter.savePNGData(imageData) { success, error in
+                Task { @MainActor in
+                    generatingAction = nil
+                    generatedImage = nil
+                    saveResult = success
+                        ? SaveResult(title: L.text("photoSave.success.title"), message: L.text("photoSave.success.message"))
+                        : SaveResult(title: L.text("photoSave.failed.title"), message: error?.localizedDescription ?? L.text("photoSave.failed.message"))
+                }
             }
         }
     }
@@ -682,7 +700,7 @@ struct SaveResult: Identifiable {
     let message: String
 }
 
-enum ExportPosterTemplate: String, CaseIterable, Identifiable {
+enum ExportPosterTemplate: String, CaseIterable, Identifiable, Hashable {
     case editorial
     case nightAtlas
     case quietMinimal

@@ -15,8 +15,8 @@ Strivory is a native iPhone movement-calendar app. It turns Apple Health Workout
 - **Yearly heatmaps** — Monday-to-Sunday rows and week columns, inspired by contribution graphs.
 - **Workout categorisation** — strength, running, cycling, swimming, ball sports, board sports, outdoors, mind & body, dance, combat, rowing, and other.
 - **CSV imports** — import historical activity data, then choose whether an import supplements or overrides Apple Health for matching days.
-- **Posters** — export multi-year PNG posters in Editorial and Night Atlas templates; share them or save them to Photos.
-- **iCloud Backup & Restore** — optional private CloudKit backup of app-owned Workout snapshots, CSV batches, and the export display name. Automatic backup runs at most once per day; manual sync is available in Settings.
+- **Posters** — export multi-year PNG posters in Editorial, Night Atlas, Quiet Minimal, and Motion Spectrum templates; share them or save them to Photos.
+- **iCloud Backup & Restore** — optional private CloudKit backup of app-owned Workout snapshots, CSV batches, and the export display name. Strivory performs a daily check, syncs local changes after they occur, and also offers manual sync in Settings.
 - **Languages** — Simplified Chinese and English, selectable inside the app.
 
 ## Screens
@@ -42,7 +42,7 @@ Supported headers:
 | --- | --- |
 | `date` or `日期` | `workout_type` or `运动类型` |
 
-Dates use `yyyy-MM-dd`. Future dates and duplicate dates within the same import file are rejected. A review/demo sample is available at [docs/strivory-review-sample.csv](docs/strivory-review-sample.csv).
+Dates use `yyyy-MM-dd`. Future dates, dates before 1900, duplicate dates, files larger than 5 MB, and imports above 50,000 records are rejected. A review/demo sample is available at [docs/strivory-review-sample.csv](docs/strivory-review-sample.csv).
 
 ## Build and run
 

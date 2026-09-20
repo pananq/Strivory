@@ -2,7 +2,7 @@ import CoreFoundation
 import Foundation
 
 struct CSVImportIssue: Identifiable, Hashable, Sendable {
-    enum Kind: Hashable, Sendable { case invalidHeader, invalidDate, missingType, duplicateDate }
+    enum Kind: Hashable, Sendable { case invalidHeader, invalidDate, missingType, duplicateDate, tooManyRecords }
 
     let id = UUID()
     let line: Int
@@ -17,12 +17,14 @@ struct CSVParseResult: Identifiable, Sendable {
     let issues: [CSVImportIssue]
 
     var hasBlockingIssues: Bool {
-        issues.contains { $0.kind == .invalidHeader || $0.kind == .duplicateDate }
+        issues.contains { $0.kind == .invalidHeader || $0.kind == .duplicateDate || $0.kind == .tooManyRecords }
     }
 }
 
 enum CSVImporter {
     static let maximumFileSize = 5 * 1_024 * 1_024
+    static let maximumRecords = 50_000
+    static let earliestSupportedYear = 1_900
 
     static func decode(_ data: Data) -> String? {
         let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
@@ -77,11 +79,21 @@ enum CSVImporter {
                 continue
             }
             let day = CalendarSupport.startOfDay(date)
+            guard CalendarSupport.year(for: day) >= earliestSupportedYear else {
+                issues.append(CSVImportIssue(line: lineNumber, message: L.text("csvError.dateRange", dateText, earliestSupportedYear), kind: .invalidDate))
+                continue
+            }
             guard seenDates.insert(day).inserted else {
                 issues.append(CSVImportIssue(line: lineNumber, message: L.text("csvError.duplicateDate", dateText), kind: .duplicateDate))
                 continue
             }
             records.append(WorkoutRecord(startDate: day, category: WorkoutCategory.fromImportedLabel(type), duration: 0, source: .csv))
+            if records.count >= maximumRecords {
+                if offset + 1 < lines.dropFirst().count {
+                    issues.append(CSVImportIssue(line: lineNumber, message: L.text("csvError.tooManyRecords", maximumRecords), kind: .tooManyRecords))
+                }
+                break
+            }
         }
         return CSVParseResult(fileName: fileName, records: records, issues: issues)
     }

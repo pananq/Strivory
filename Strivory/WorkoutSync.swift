@@ -30,7 +30,7 @@ protocol CloudBackupProviding: Sendable {
 
 /// Records, deletion evidence and the device-local query anchor are one atomic
 /// checkpoint. An anchor must never advance without its corresponding data.
-struct PersistedHealthState: Codable {
+struct PersistedHealthState: Codable, Equatable {
     static let currentReconciliationVersion = 1
 
     var records: [WorkoutRecord]
@@ -40,7 +40,13 @@ struct PersistedHealthState: Codable {
 
     func applying(_ result: HealthKitFetchResult, isFullRefresh: Bool) -> Self {
         let deleted = deletedWorkoutIDs.union(result.deletedWorkoutIDs)
-        var byID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        // A nil-anchor query is a snapshot of the workouts that are currently
+        // readable. Seed incremental reads from the archive, but make a
+        // non-empty full refresh authoritative so old records whose deletion
+        // notification has expired cannot live in the archive forever.
+        var byID: [UUID: WorkoutRecord] = isFullRefresh
+            ? [:]
+            : Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         for record in result.workouts { byID[record.id] = record }
         for id in deleted { byID.removeValue(forKey: id) }
         return Self(
@@ -67,10 +73,10 @@ extension ICloudBackupSnapshot {
             if let existing = batches[batch.id], existing.createdAt > batch.createdAt { continue }
             batches[batch.id] = batch
         }
-        let activeBatches = batches.values.filter { batch in
-            guard let deletedAt = deletedBatches[batch.id.uuidString] else { return true }
-            return deletedAt < batch.createdAt
-        }
+        // Batch identifiers are immutable and never reused. Once an identifier
+        // has a tombstone, deletion must win regardless of clock skew between
+        // devices.
+        let activeBatches = batches.values.filter { deletedBatches[$0.id.uuidString] == nil }
 
         var health = Dictionary((remote?.healthArchive ?? []).map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         for record in local.healthArchive { health[record.id] = record }

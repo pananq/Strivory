@@ -144,11 +144,16 @@ private struct SyncRegressionTests {
         try await delayedCloudResponse()
         try await deletionSurvivesRestart()
         try await reconciliationRecoversMissingWorkout()
+        try await fullRefreshRemovesMissingWorkoutWithoutTombstone()
         try await emptyFullReadPreservesHistory()
         try await failedSaveDoesNotAdvanceAnchor()
         try await restorePreservesConcurrentHealthChange()
         try await legacyLocalMigration()
-        print("PASS: all 8 sync regression scenarios")
+        try yearlyOtherAggregation()
+        try categoryMappingSpecificity()
+        try batchDeletionIgnoresClockSkew()
+        try legacyImportMigration()
+        print("PASS: all 13 sync and data regression scenarios")
     }
 
     static func legacyBackupAndTombstones() throws {
@@ -256,6 +261,19 @@ private struct SyncRegressionTests {
         print("PASS: empty/denied full read preserves history and does not mark reconciliation complete")
     }
 
+    @MainActor static func fullRefreshRemovesMissingWorkoutWithoutTombstone() async throws {
+        let football = record(14, .ballSports), swimming = record(19, .swimming)
+        let fixture = try Fixture(records: [football, swimming], reconciliationVersion: 0)
+        let store = fixture.makeStore()
+        defer { fixture.cleanup(store) }
+        fixture.health.results = [HealthKitFetchResult(workouts: [swimming], deletedWorkoutIDs: [], anchorData: Data([8]))]
+        await store.requestHealthAccessAndRefresh()
+        assert(store.healthRecords == [swimming])
+        let saved = try fixture.savedState()
+        assert(saved.records == [swimming])
+        print("PASS: a non-empty full Health snapshot removes archived workouts that no longer exist")
+    }
+
     @MainActor static func failedSaveDoesNotAdvanceAnchor() async throws {
         let football = record(14, .ballSports), swimming = record(19, .swimming)
         let fixture = try Fixture(records: [football])
@@ -317,5 +335,70 @@ private struct SyncRegressionTests {
             assert(fixture.defaults.data(forKey: "strivory.health.anchor") == nil)
         }
         print("PASS: legacy file/UserDefaults archives migrate without trusting the old, possibly advanced anchor")
+    }
+
+    @MainActor static func yearlyOtherAggregation() throws {
+        let categories: [WorkoutCategory] = [
+            .other, .other, .other, .other, .other,
+            .strength, .strength, .strength, .strength,
+            .swimming, .swimming, .swimming,
+            .outdoors, .outdoors,
+            .ballSports, .running
+        ]
+        let records = categories.enumerated().map { index, category in record(index + 1, category) }
+        let fixture = try Fixture(records: records)
+        let store = fixture.makeStore()
+        defer { fixture.cleanup(store) }
+        let summary = store.summary(for: 2026)
+        assert(!summary.topCategories.contains(.other))
+        assert(summary.topCategories.count == 4)
+        assert(summary.otherCount == 6)
+        assert(summary.count(for: .other) == 6)
+        print("PASS: raw Other plus categories outside the top four aggregate into one legend value")
+    }
+
+    static func categoryMappingSpecificity() throws {
+        assert(WorkoutCategory.fromImportedLabel("Running Training") == .running)
+        assert(WorkoutCategory.fromImportedLabel("Football Training") == .ballSports)
+        assert(WorkoutCategory.fromImportedLabel("Cycling Training") == .cycling)
+        assert(WorkoutCategory.fromImportedLabel("Functional Training") == .strength)
+        print("PASS: generic training labels no longer override specific workout categories")
+    }
+
+    static func batchDeletionIgnoresClockSkew() throws {
+        let batchID = UUID()
+        let batch = CSVImportBatch(
+            id: batchID,
+            name: "future.csv",
+            createdAt: Date(timeIntervalSince1970: 4_000_000_000),
+            strategy: .supplement,
+            records: [WorkoutRecord(startDate: day(10), category: .running, duration: 0, source: .csv, batchID: batchID)]
+        )
+        var remote = snapshot([])
+        remote.importBatches = [batch]
+        var local = snapshot([])
+        local.deletedBatchDates = [batchID.uuidString: Date(timeIntervalSince1970: 1)]
+        assert(ICloudBackupSnapshot.merging(local: local, remote: remote).importBatches.isEmpty)
+        print("PASS: CSV deletion tombstones win even when device clocks disagree")
+    }
+
+    @MainActor static func legacyImportMigration() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let batchID = UUID()
+        let batch = CSVImportBatch(
+            id: batchID,
+            name: "legacy.csv",
+            createdAt: .now,
+            strategy: .supplement,
+            records: [WorkoutRecord(startDate: day(11), category: .running, duration: 0, source: .csv, batchID: batchID)]
+        )
+        fixture.defaults.set(try JSONEncoder().encode([batch]), forKey: "strivory.csv.batches")
+        let store = fixture.makeStore()
+        assert(store.importBatches == [batch])
+        assert(fixture.defaults.data(forKey: "strivory.csv.batches") == nil)
+        let fileURL = fixture.archiveURL.deletingLastPathComponent().appendingPathComponent("import-batches.json")
+        assert(FileManager.default.fileExists(atPath: fileURL.path))
+        print("PASS: legacy CSV data migrates from UserDefaults to the protected archive file")
     }
 }
